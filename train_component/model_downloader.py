@@ -504,15 +504,79 @@ class ModelDownloader:
                         size = self.get_model_size(model_path)
                         print(f"   大小: {size}")
                         
+                        # 显示详细模型信息
+                        self.show_model_details(model_path)
+                        
                         models.append(str(model_path))
                     except:
                         print(f"{i}. 📁 {model_path.name} (信息文件损坏)")
                         models.append(str(model_path))
                 else:
                     print(f"{i}. 📁 {model_path.name} (无信息文件)")
+                    # 尝试显示模型详细信息
+                    self.show_model_details(model_path)
                     models.append(str(model_path))
         
         return models
+    
+    def show_model_details(self, model_path: Path):
+        """显示模型的详细信息"""
+        try:
+            print(f"   🔍 正在分析模型信息...")
+            
+            # 尝试加载配置
+            config = AutoConfig.from_pretrained(str(model_path), trust_remote_code=True)
+            
+            print(f"   📊 模型配置:")
+            print(f"     模型类型: {getattr(config, 'model_type', 'unknown')}")
+            print(f"     隐藏层大小: {getattr(config, 'hidden_size', 'N/A')}")
+            print(f"     隐藏层数量: {getattr(config, 'num_hidden_layers', 'N/A')}")
+            print(f"     注意力头数: {getattr(config, 'num_attention_heads', 'N/A')}")
+            print(f"     词汇表大小: {getattr(config, 'vocab_size', 'N/A')}")
+            print(f"     最大位置编码: {getattr(config, 'max_position_embeddings', 'N/A')}")
+            
+            # 尝试加载tokenizer
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(str(model_path), trust_remote_code=True)
+                print(f"   🔤 Tokenizer信息:")
+                print(f"     Tokenizer类型: {type(tokenizer).__name__}")
+                print(f"     词汇表大小: {tokenizer.vocab_size}")
+                print(f"     Pad Token: {tokenizer.pad_token}")
+                print(f"     EOS Token: {tokenizer.eos_token}")
+                print(f"     BOS Token: {tokenizer.bos_token}")
+            except Exception as e:
+                print(f"   ⚠️  无法加载tokenizer: {str(e)[:50]}...")
+            
+            # 计算参数量
+            try:
+                print(f"   🧠 正在计算参数量...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    str(model_path),
+                    torch_dtype=torch.float16,
+                    device_map='auto' if torch.cuda.is_available() else None,
+                    trust_remote_code=True
+                )
+                
+                total_params = sum(p.numel() for p in model.parameters())
+                trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                
+                print(f"   📈 参数量:")
+                print(f"     总参数量: {total_params:,}")
+                print(f"     可训练参数: {trainable_params:,}")
+                print(f"     参数量(十亿): {total_params / 1e9:.2f}B")
+                
+                # 释放内存
+                del model
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    
+            except Exception as e:
+                print(f"   ⚠️  无法计算参数量: {str(e)[:50]}...")
+            
+        except Exception as e:
+            print(f"   ❌ 无法分析模型信息: {str(e)[:50]}...")
+        
+        print()  # 添加空行分隔
     
     def get_model_size(self, model_path: Path):
         """获取模型大小"""
@@ -628,10 +692,11 @@ def main():
         print("2. 从Hugging Face下载")
         print("3. 从ModelScope下载")
         print("4. 查看已下载模型")
-        print("5. 删除模型")
-        print("6. 退出")
+        print("5. 查看模型详细信息")
+        print("6. 删除模型")
+        print("7. 退出")
         
-        choice = input("\n请输入选择 (1-6): ").strip()
+        choice = input("\n请输入选择 (1-7): ").strip()
         
         if choice == "1":
             model_name = input("请输入模型名称: ").strip()
@@ -658,6 +723,27 @@ def main():
             downloader.list_downloaded_models()
             
         elif choice == "5":
+            print("\n📊 查看模型详细信息")
+            print("=" * 30)
+            models = downloader.list_downloaded_models()
+            
+            if not models:
+                print("❌ 没有可查看的模型")
+                continue
+            
+            try:
+                index = int(input("请输入要查看详细信息的模型索引: ").strip())
+                if 1 <= index <= len(models):
+                    model_path = Path(models[index - 1])
+                    print(f"\n🔍 正在分析模型: {model_path.name}")
+                    print("=" * 50)
+                    downloader.show_model_details(model_path)
+                else:
+                    print("❌ 无效的索引")
+            except ValueError:
+                print("❌ 请输入有效的数字")
+            
+        elif choice == "6":
             print("\n🗑️  删除模型")
             print("=" * 30)
             models = downloader.list_downloaded_models()
@@ -692,7 +778,7 @@ def main():
             else:
                 print("❌ 无效的选择")
             
-        elif choice == "6":
+        elif choice == "7":
             print("👋 再见！")
             break
             
