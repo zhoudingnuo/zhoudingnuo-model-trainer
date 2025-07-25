@@ -162,13 +162,16 @@ class ModelChat:
                 outputs = self.model.generate(
                     input_ids,
                     attention_mask=attention_mask,
-                    max_new_tokens=2048,  # 增加生成长度
+                    max_new_tokens=1024,  # 适中的生成长度
                     temperature=temperature,
                     do_sample=True,
+                    top_p=0.9,  # 添加top_p采样
+                    top_k=50,   # 添加top_k采样
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    repetition_penalty=1.1,
-                    use_cache=True
+                    repetition_penalty=1.2,  # 增加重复惩罚
+                    use_cache=True,
+                    no_repeat_ngram_size=3  # 避免重复的n-gram
                 )
                 
                 # 解码输出
@@ -256,9 +259,11 @@ class ModelChat:
                 if not user_input:
                     continue
                 
-                # 构建完整提示
+                # 构建完整提示 - 只包含最近的对话历史
                 if conversation_history:
-                    full_prompt = "\n".join(conversation_history) + f"\n用户: {user_input}\n助手:"
+                    # 限制历史长度，避免上下文过长
+                    recent_history = conversation_history[-6:]  # 只保留最近3轮对话
+                    full_prompt = "\n".join(recent_history) + f"\n用户: {user_input}\n助手:"
                 else:
                     full_prompt = f"用户: {user_input}\n助手:"
                 
@@ -289,9 +294,9 @@ class ModelChat:
                     conversation_history.append(f"用户: {user_input}")
                     conversation_history.append(f"助手: {response}")
                     
-                    # 限制对话历史长度
-                    if len(conversation_history) > 10:
-                        conversation_history = conversation_history[-10:]
+                    # 限制对话历史长度，避免过长
+                    if len(conversation_history) > 8:  # 保留最近4轮对话
+                        conversation_history = conversation_history[-8:]
                 else:
                     print("抱歉，我无法生成回复。")
                     
