@@ -48,45 +48,103 @@ class ModelDownloader:
         print("🌐 从Hugging Face下载...")
         
         try:
-            # 设置更长的超时时间和重试
             import requests
             from huggingface_hub import HfApi
             
             # 测试网络连接
             print("🔍 测试网络连接...")
-            try:
-                response = requests.get("https://huggingface.co", timeout=10)
-                if response.status_code != 200:
-                    print("⚠️  网络连接不稳定")
-            except Exception as e:
-                print(f"⚠️  网络连接测试失败: {e}")
-                print("💡 建议使用ModelScope下载源")
+            test_urls = [
+                "https://huggingface.co",
+                "https://hf-mirror.com",  # 国内镜像
+                "https://huggingface.co.cn"  # 另一个镜像
+            ]
             
-            # 下载tokenizer
+            network_ok = False
+            for url in test_urls:
+                try:
+                    response = requests.get(url, timeout=5)
+                    if response.status_code == 200:
+                        print(f"✅ 网络连接正常: {url}")
+                        network_ok = True
+                        break
+                except Exception as e:
+                    print(f"❌ 连接失败: {url} - {e}")
+                    continue
+            
+            if not network_ok:
+                print("⚠️  所有网络连接都失败")
+                print("💡 建议使用ModelScope下载源")
+                return False
+            
+            # 配置镜像
+            import os
+            # 设置环境变量使用国内镜像
+            os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+            os.environ['HF_HUB_URL'] = 'https://hf-mirror.com'
+            
+            # 设置huggingface_hub使用镜像
+            try:
+                from huggingface_hub import set_http_backend
+                set_http_backend("https://hf-mirror.com")
+            except:
+                pass
+            
             print("🔤 下载tokenizer...")
-            tokenizer = AutoTokenizer.from_pretrained(
-                model_name, 
-                trust_remote_code=True,
-                cache_dir=save_dir,
-                local_files_only=False,  # 允许从网络下载
-                resume_download=True,    # 支持断点续传
-                proxies=None             # 不使用代理
-            )
+            # 尝试不同的代理配置
+            proxy_configs = [
+                None,  # 无代理
+                {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'},  # 常见代理端口
+                {'http': 'http://127.0.0.1:1080', 'https': 'http://127.0.0.1:1080'},  # 另一个常见端口
+            ]
+            
+            for proxies in proxy_configs:
+                try:
+                    print(f"🔧 尝试代理配置: {proxies}")
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        model_name, 
+                        trust_remote_code=True,
+                        cache_dir=save_dir,
+                        local_files_only=False,
+                        resume_download=True,
+                        proxies=proxies,
+                        mirror='tuna',  # 使用清华镜像
+                        use_auth_token=None
+                    )
+                    print("✅ tokenizer下载成功")
+                    break
+                except Exception as e:
+                    print(f"❌ 代理配置失败: {e}")
+                    continue
+            else:
+                raise Exception("所有代理配置都失败了")
             tokenizer.save_pretrained(save_dir)
             print("✅ tokenizer下载完成")
             
             # 下载模型
             print("🧠 下载模型...")
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                trust_remote_code=True,
-                cache_dir=save_dir,
-                torch_dtype=torch.float16,  # 使用半精度节省空间
-                device_map="auto" if torch.cuda.is_available() else None,
-                local_files_only=False,    # 允许从网络下载
-                resume_download=True,      # 支持断点续传
-                proxies=None               # 不使用代理
-            )
+            # 使用相同的代理配置
+            for proxies in proxy_configs:
+                try:
+                    print(f"🔧 尝试代理配置下载模型: {proxies}")
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        trust_remote_code=True,
+                        cache_dir=save_dir,
+                        torch_dtype=torch.float16,
+                        device_map="auto" if torch.cuda.is_available() else None,
+                        local_files_only=False,
+                        resume_download=True,
+                        proxies=proxies,
+                        mirror='tuna',  # 使用清华镜像
+                        use_auth_token=None
+                    )
+                    print("✅ 模型下载成功")
+                    break
+                except Exception as e:
+                    print(f"❌ 模型下载代理配置失败: {e}")
+                    continue
+            else:
+                raise Exception("所有模型下载代理配置都失败了")
             model.save_pretrained(save_dir)
             print("✅ 模型下载完成")
             
@@ -105,7 +163,60 @@ class ModelDownloader:
             return False
         except Exception as e:
             print(f"❌ Hugging Face下载失败: {e}")
-            print("💡 建议使用ModelScope下载源")
+            print("🔄 尝试使用命令行下载...")
+            return self.download_with_cli(model_name, save_dir)
+    
+    def download_with_cli(self, model_name: str, save_dir: Path):
+        """使用命令行工具下载模型"""
+        print("🔧 使用命令行下载...")
+        
+        try:
+            # 尝试使用git lfs
+            print("📥 使用git lfs下载...")
+            # 尝试不同的镜像URL
+            mirror_urls = [
+                f"https://huggingface.co/{model_name}",
+                f"https://hf-mirror.com/{model_name}",
+                f"https://huggingface.co.cn/{model_name}"
+            ]
+            
+            for url in mirror_urls:
+                try:
+                    print(f"🔧 尝试镜像: {url}")
+                    cmd = f"git lfs install && git clone {url} {save_dir}"
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    
+                    if result.returncode == 0:
+                        print("✅ 命令行下载成功")
+                        return True
+                    else:
+                        print(f"❌ 镜像失败: {result.stderr}")
+                except Exception as e:
+                    print(f"❌ 镜像异常: {e}")
+                    continue
+            
+            # 如果git lfs失败，尝试使用wget
+            print("📥 尝试使用wget下载...")
+            for url in mirror_urls:
+                try:
+                    print(f"🔧 尝试wget镜像: {url}")
+                    cmd = f"wget -r -np -nH --cut-dirs=2 -R 'index.html*' {url}/tree/main -P {save_dir}"
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    
+                    if result.returncode == 0:
+                        print("✅ wget下载成功")
+                        return True
+                    else:
+                        print(f"❌ wget镜像失败: {result.stderr}")
+                except Exception as e:
+                    print(f"❌ wget镜像异常: {e}")
+                    continue
+            
+            print("❌ 所有命令行下载方法都失败了")
+            return False
+            
+        except Exception as e:
+            print(f"❌ 命令行下载失败: {e}")
             return False
     
     def download_from_modelscope(self, model_name: str, save_dir: Path):
