@@ -37,6 +37,9 @@ modelscope>=1.9.0
 # 协议缓冲区
 protobuf>=3.20.0
 
+# 分词器依赖
+sentencepiece>=0.1.99
+
 # 可选：用于更好的性能
 # 如果安装失败可以注释掉
 # flash-attn>=2.0.0
