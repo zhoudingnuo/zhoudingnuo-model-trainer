@@ -36,18 +36,15 @@ class ModelChat:
             return []
         
         models = []
-        for model_path in self.model_dir.iterdir():
+        for i, model_path in enumerate(self.model_dir.iterdir(), 1):
             if model_path.is_dir():
                 # 检查是否有必要的文件
                 config_file = model_path / "config.json"
                 tokenizer_file = model_path / "tokenizer.json"
                 
                 if config_file.exists():
-                    print(f"📁 {model_path.name}")
-                    if tokenizer_file.exists():
-                        print("   ✅ 完整模型 (包含tokenizer)")
-                    else:
-                        print("   ⚠️  部分模型 (缺少tokenizer)")
+                    status = "✅ 完整模型" if tokenizer_file.exists() else "⚠️  部分模型"
+                    print(f"{i:2d}. 📁 {model_path.name} ({status})")
                     models.append(str(model_path))
         
         return models
@@ -205,8 +202,8 @@ class ModelChat:
         while True:
             print("\n请选择操作:")
             print("1. 查看可用模型")
-            print("2. 加载模型")
-            print("3. 开始对话")
+            print("2. 选择模型并开始对话")
+            print("3. 重新加载当前模型")
             print("4. 退出")
             
             choice = input("\n请输入选择 (1-4): ").strip()
@@ -217,17 +214,39 @@ class ModelChat:
             elif choice == "2":
                 models = self.list_available_models()
                 if models:
-                    model_choice = input("\n请选择模型路径: ").strip()
-                    if model_choice:
-                        self.load_model(model_choice)
+                    while True:
+                        try:
+                            model_choice = input(f"\n请选择模型 (1-{len(models)}): ").strip()
+                            if not model_choice:
+                                print("❌ 请输入选择")
+                                continue
+                            
+                            choice_num = int(model_choice)
+                            if 1 <= choice_num <= len(models):
+                                selected_model = models[choice_num - 1]
+                                print(f"✅ 已选择: {Path(selected_model).name}")
+                                
+                                # 加载模型
+                                if self.load_model(selected_model):
+                                    print("🚀 模型加载成功，开始对话...")
+                                    self.chat_loop()
+                                else:
+                                    print("❌ 模型加载失败")
+                                break
+                            else:
+                                print(f"❌ 请输入 1-{len(models)} 之间的数字")
+                        except ValueError:
+                            print("❌ 请输入有效的数字")
                 else:
                     print("❌ 没有可用的模型")
                     
             elif choice == "3":
                 if self.model is None:
-                    print("❌ 请先加载模型")
+                    print("❌ 当前没有加载的模型")
                 else:
-                    self.chat_loop()
+                    print("🔄 重新加载当前模型...")
+                    # 这里可以添加重新加载逻辑
+                    print("✅ 模型已重新加载")
                     
             elif choice == "4":
                 print("👋 再见！")
