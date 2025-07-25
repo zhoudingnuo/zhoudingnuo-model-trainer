@@ -130,7 +130,7 @@ class CustomTrainer(Trainer):
         return optimizer
 
 class ModelExpander:
-    def __init__(self, model_dir: str = "../model", data_dir: str = "data"):
+    def __init__(self, model_dir: str = "model", data_dir: str = "data"):
         """
         初始化模型扩展器
         
