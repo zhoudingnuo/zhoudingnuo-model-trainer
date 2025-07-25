@@ -48,12 +48,29 @@ class ModelDownloader:
         print("🌐 从Hugging Face下载...")
         
         try:
+            # 设置更长的超时时间和重试
+            import requests
+            from huggingface_hub import HfApi
+            
+            # 测试网络连接
+            print("🔍 测试网络连接...")
+            try:
+                response = requests.get("https://huggingface.co", timeout=10)
+                if response.status_code != 200:
+                    print("⚠️  网络连接不稳定")
+            except Exception as e:
+                print(f"⚠️  网络连接测试失败: {e}")
+                print("💡 建议使用ModelScope下载源")
+            
             # 下载tokenizer
             print("🔤 下载tokenizer...")
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name, 
                 trust_remote_code=True,
-                cache_dir=save_dir
+                cache_dir=save_dir,
+                local_files_only=False,  # 允许从网络下载
+                resume_download=True,    # 支持断点续传
+                proxies=None             # 不使用代理
             )
             tokenizer.save_pretrained(save_dir)
             print("✅ tokenizer下载完成")
@@ -65,15 +82,30 @@ class ModelDownloader:
                 trust_remote_code=True,
                 cache_dir=save_dir,
                 torch_dtype=torch.float16,  # 使用半精度节省空间
-                device_map="auto" if torch.cuda.is_available() else None
+                device_map="auto" if torch.cuda.is_available() else None,
+                local_files_only=False,    # 允许从网络下载
+                resume_download=True,      # 支持断点续传
+                proxies=None               # 不使用代理
             )
             model.save_pretrained(save_dir)
             print("✅ 模型下载完成")
             
             return True
             
+        except requests.exceptions.ConnectionError as e:
+            print(f"❌ 网络连接失败: {e}")
+            print("💡 建议:")
+            print("   1. 检查网络连接")
+            print("   2. 使用ModelScope下载源")
+            print("   3. 配置代理或VPN")
+            return False
+        except requests.exceptions.Timeout as e:
+            print(f"❌ 网络超时: {e}")
+            print("💡 建议使用ModelScope下载源")
+            return False
         except Exception as e:
             print(f"❌ Hugging Face下载失败: {e}")
+            print("💡 建议使用ModelScope下载源")
             return False
     
     def download_from_modelscope(self, model_name: str, save_dir: Path):
@@ -153,17 +185,18 @@ class ModelDownloader:
             # 自动选择下载源
             print("🔄 自动选择下载源...")
             
-            # 先尝试Hugging Face
-            print("1️⃣ 尝试从Hugging Face下载...")
-            success = self.download_from_huggingface(model_name, save_dir)
+            # 优先尝试ModelScope（国内网络更稳定）
+            print("1️⃣ 优先尝试ModelScope下载...")
+            if not self.check_modelscope_installed():
+                if not self.install_modelscope():
+                    print("❌ ModelScope安装失败")
+                    return None
+            success = self.download_from_modelscope(model_name, save_dir)
             
             if not success:
-                # 如果Hugging Face失败，尝试ModelScope
-                print("2️⃣ Hugging Face失败，尝试ModelScope...")
-                if not self.check_modelscope_installed():
-                    if not self.install_modelscope():
-                        return None
-                success = self.download_from_modelscope(model_name, save_dir)
+                # 如果ModelScope失败，尝试Hugging Face
+                print("2️⃣ ModelScope失败，尝试Hugging Face...")
+                success = self.download_from_huggingface(model_name, save_dir)
         
         if success:
             # 保存模型信息
@@ -220,20 +253,24 @@ def main():
     print("🚀 模型下载器")
     print("=" * 50)
     print("支持的下载源:")
+    print("- ModelScope: 阿里云模型社区（推荐，国内网络稳定）")
     print("- Hugging Face: 全球最大的模型社区")
-    print("- ModelScope: 阿里云模型社区")
+    print()
+    print("💡 建议:")
+    print("- 国内用户优先使用ModelScope")
+    print("- 如果网络不稳定，选择ModelScope下载源")
     print()
     print("示例模型名称:")
+    print("ModelScope（推荐）:")
+    print("- YIRONGCHEN/SoulChat2.0-Yi-1.5-9B")
+    print("- qwen/Qwen2.5-7B-Instruct")
+    print("- THUDM/chatglm3-6b")
+    print()
     print("Hugging Face:")
     print("- microsoft/DialoGPT-medium")
     print("- Qwen/Qwen2.5-7B-Instruct")
     print("- THUDM/chatglm3-6b")
     print("- baichuan-inc/Baichuan2-7B-Chat")
-    print()
-    print("ModelScope:")
-    print("- YIRONGCHEN/SoulChat2.0-Yi-1.5-9B")
-    print("- qwen/Qwen2.5-7B-Instruct")
-    print("- THUDM/chatglm3-6b")
     print()
     
     while True:
