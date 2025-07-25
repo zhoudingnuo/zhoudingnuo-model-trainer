@@ -164,6 +164,11 @@ class ModelExpander:
         
         for i, model_path in enumerate(model_dir_path.iterdir(), 1):
             if model_path.is_dir():
+                # 过滤掉训练输出目录
+                if model_path.name in ['trained', 'output', 'checkpoints', 'logs']:
+                    print(f"{i}. ⏭️  跳过训练目录: {model_path.name}")
+                    continue
+                
                 info_file = model_path / "model_info.json"
                 if info_file.exists():
                     try:
@@ -186,10 +191,16 @@ class ModelExpander:
                         print(f"{i}. 📁 {model_path.name} (信息文件损坏)")
                         models.append(str(model_path))
                 else:
-                    print(f"{i}. 📁 {model_path.name} (无信息文件)")
-                    # 尝试显示模型详细信息
-                    self.show_model_details(model_path)
-                    models.append(str(model_path))
+                    # 检查是否有config.json文件来确认是真正的模型
+                    config_file = model_path / "config.json"
+                    if config_file.exists():
+                        print(f"{i}. 📁 {model_path.name} (无信息文件)")
+                        # 尝试显示模型详细信息
+                        self.show_model_details(model_path)
+                        models.append(str(model_path))
+                    else:
+                        print(f"{i}. ⏭️  跳过非模型目录: {model_path.name}")
+                        continue
         
         return models
     
