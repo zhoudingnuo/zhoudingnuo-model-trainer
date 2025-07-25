@@ -537,127 +537,6 @@ class ModelDownloader:
         
         model_name = models[index - 1]
         return self.delete_model(model_name)
-    
-    def force_download_from_huggingface(self, model_name: str):
-        """强制从Hugging Face下载模型（跳过网络检测）"""
-        print("🚀 强制从Hugging Face下载...")
-        print("⚠️  跳过网络检测，直接尝试下载")
-        
-        # 创建保存目录
-        if '/' in model_name:
-            save_dir_name = model_name.split('/')[-1]
-        else:
-            save_dir_name = model_name
-        
-        save_dir = self.model_dir / save_dir_name
-        save_dir.mkdir(parents=True, exist_ok=True)
-        
-        print(f"📥 开始下载模型: {model_name}")
-        print(f"📁 保存目录: {save_dir}")
-        
-        # 尝试多种镜像和代理配置
-        success = self.force_huggingface_download(model_name, save_dir)
-        
-        if success:
-            # 保存模型信息
-            model_info = {
-                "name": model_name,
-                "source": "huggingface_forced",
-                "local_path": str(save_dir),
-                "download_time": str(datetime.now()),
-                "model_type": "causal_lm"
-            }
-            
-            with open(save_dir / "model_info.json", "w", encoding="utf-8") as f:
-                json.dump(model_info, f, ensure_ascii=False, indent=2)
-            
-            print(f"🎉 强制下载完成！保存在: {save_dir}")
-            return str(save_dir)
-        else:
-            print(f"❌ 强制下载失败")
-            return None
-    
-    def force_huggingface_download(self, model_name: str, save_dir: Path):
-        """强制Hugging Face下载实现"""
-        print("🌐 强制从Hugging Face下载...")
-        
-        try:
-            import requests
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-            
-            # 尝试多个镜像站点
-            mirror_urls = [
-                "https://huggingface.co",
-                "https://hf-mirror.com",
-                "https://huggingface.co.cn",
-                "https://hf-mirror.com"
-            ]
-            
-            # 尝试多种代理配置
-            proxy_configs = [
-                None,  # 无代理
-                {'http': 'http://127.0.0.1:7890', 'https': 'http://127.0.0.1:7890'},
-                {'http': 'http://127.0.0.1:1080', 'https': 'http://127.0.0.1:1080'},
-                {'http': 'http://127.0.0.1:8080', 'https': 'http://127.0.0.1:8080'},
-            ]
-            
-            for mirror_url in mirror_urls:
-                print(f"🔧 尝试镜像: {mirror_url}")
-                
-                # 设置环境变量
-                import os
-                os.environ['HF_ENDPOINT'] = mirror_url
-                os.environ['HF_HUB_URL'] = mirror_url
-                
-                for proxies in proxy_configs:
-                    try:
-                        print(f"🔧 尝试代理配置: {proxies}")
-                        
-                        # 下载tokenizer
-                        print("🔤 下载tokenizer...")
-                        tokenizer = AutoTokenizer.from_pretrained(
-                            model_name, 
-                            trust_remote_code=True,
-                            cache_dir=save_dir,
-                            local_files_only=False,
-                            resume_download=True,
-                            proxies=proxies,
-                            mirror='aliyun',
-                            use_auth_token=None
-                        )
-                        tokenizer.save_pretrained(save_dir)
-                        print("✅ tokenizer下载成功")
-                        
-                        # 下载模型
-                        print("🧠 下载模型...")
-                        model = AutoModelForCausalLM.from_pretrained(
-                            model_name,
-                            trust_remote_code=True,
-                            cache_dir=save_dir,
-                            torch_dtype=torch.float16,
-                            device_map="auto" if torch.cuda.is_available() else None,
-                            local_files_only=False,
-                            resume_download=True,
-                            proxies=proxies,
-                            mirror='aliyun',
-                            use_auth_token=None
-                        )
-                        model.save_pretrained(save_dir)
-                        print("✅ 模型下载成功")
-                        
-                        return True
-                        
-                    except Exception as e:
-                        print(f"❌ 配置失败: {e}")
-                        continue
-            
-            # 如果所有配置都失败，尝试命令行下载
-            print("🔄 所有配置都失败，尝试命令行下载...")
-            return self.download_with_cli(model_name, save_dir)
-            
-        except Exception as e:
-            print(f"❌ 强制下载失败: {e}")
-            return False
 
 def main():
     """主函数"""
@@ -692,13 +571,12 @@ def main():
         print("\n请选择操作:")
         print("1. 下载模型 (自动选择源)")
         print("2. 从Hugging Face下载")
-        print("3. 强制从Hugging Face下载 (跳过网络检测)")
-        print("4. 从ModelScope下载")
-        print("5. 查看已下载模型")
-        print("6. 删除模型")
-        print("7. 退出")
+        print("3. 从ModelScope下载")
+        print("4. 查看已下载模型")
+        print("5. 删除模型")
+        print("6. 退出")
         
-        choice = input("\n请输入选择 (1-7): ").strip()
+        choice = input("\n请输入选择 (1-6): ").strip()
         
         if choice == "1":
             model_name = input("请输入模型名称: ").strip()
@@ -715,23 +593,16 @@ def main():
                 print("❌ 模型名称不能为空")
                 
         elif choice == "3":
-            model_name = input("请输入Hugging Face模型名称: ").strip()
-            if model_name:
-                downloader.force_download_from_huggingface(model_name)
-            else:
-                print("❌ 模型名称不能为空")
-                
-        elif choice == "4":
             model_name = input("请输入ModelScope模型名称: ").strip()
             if model_name:
                 downloader.download_model(model_name, "modelscope")
             else:
                 print("❌ 模型名称不能为空")
                 
-        elif choice == "5":
+        elif choice == "4":
             downloader.list_downloaded_models()
             
-        elif choice == "6":
+        elif choice == "5":
             print("\n🗑️  删除模型")
             print("=" * 30)
             models = downloader.list_downloaded_models()
@@ -766,7 +637,7 @@ def main():
             else:
                 print("❌ 无效的选择")
             
-        elif choice == "7":
+        elif choice == "6":
             print("👋 再见！")
             break
             

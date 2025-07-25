@@ -7,8 +7,10 @@
 
 import os
 import json
-from transformers import AutoConfig, AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM
 import torch
+import warnings
+warnings.filterwarnings("ignore")
 
 class ModelInfoDetector:
     def __init__(self, model_dir="../model"):
@@ -60,57 +62,39 @@ class ModelInfoDetector:
         return models
     
     def _is_model_directory(self, path):
-        """检查目录是否包含模型文件"""
+        """检查目录是否包含模型文件 - 使用transformers库的方式"""
         print(f"🔍 检查目录: {os.path.basename(path)}")
         
-        # 检查常见的模型文件
-        model_files = [
-            'config.json',
-            'tokenizer.json', 
-            'tokenizer_config.json',
-            'pytorch_model.bin',
-            'model.safetensors',
-            'tokenizer.model',  # sentencepiece tokenizer
-            'special_tokens_map.json'
-        ]
-        
-        # 检查直接文件
-        for file in model_files:
-            if os.path.exists(os.path.join(path, file)):
-                print(f"  ✅ 找到模型文件: {file}")
-                return True
-        
-        # 检查snapshots子目录（Hugging Face Hub格式）
-        snapshots_dir = os.path.join(path, 'snapshots')
-        if os.path.exists(snapshots_dir):
-            print(f"  📁 检查snapshots目录...")
-            for snapshot in os.listdir(snapshots_dir):
-                snapshot_path = os.path.join(snapshots_dir, snapshot)
-                if os.path.isdir(snapshot_path):
-                    for file in model_files:
-                        if os.path.exists(os.path.join(snapshot_path, file)):
-                            print(f"  ✅ 在snapshot中找到模型文件: {file}")
-                            return True
-        
-        # 检查ModelScope格式（直接包含模型文件）
-        print(f"  📁 检查ModelScope格式...")
         try:
-            # 列出目录内容
-            files = os.listdir(path)
-            print(f"    目录内容: {files[:10]}...")  # 只显示前10个文件
-            
-            # 检查是否有任何模型相关文件
-            model_indicators = ['config.json', 'tokenizer', 'model', '.bin', '.safetensors']
-            for file in files:
-                for indicator in model_indicators:
-                    if indicator in file:
-                        print(f"  ✅ 找到模型指示文件: {file}")
-                        return True
+            # 尝试加载配置，这是最可靠的方式
+            config = AutoConfig.from_pretrained(path, trust_remote_code=True)
+            print(f"  ✅ 找到模型配置: {config.model_type}")
+            return True
         except Exception as e:
-            print(f"  ❌ 检查目录时出错: {e}")
-        
-        print(f"  ❌ 未找到模型文件")
-        return False
+            print(f"  ❌ 无法加载模型配置: {str(e)[:100]}...")
+            
+            # 备用检查：查看是否有常见的模型文件
+            model_files = [
+                'config.json',
+                'tokenizer.json', 
+                'tokenizer_config.json',
+                'pytorch_model.bin',
+                'model.safetensors',
+                'tokenizer.model',
+                'special_tokens_map.json'
+            ]
+            
+            found_files = []
+            for file in model_files:
+                if os.path.exists(os.path.join(path, file)):
+                    found_files.append(file)
+            
+            if found_files:
+                print(f"  ⚠️  找到模型文件: {found_files}")
+                return True
+            
+            print(f"  ❌ 未找到模型文件")
+            return False
     
     def get_model_path(self, model_name):
         """获取模型的实际路径"""
@@ -118,35 +102,26 @@ class ModelInfoDetector:
         
         print(f"🔍 查找模型路径: {model_name}")
         
-        # 检查直接路径
-        if os.path.exists(os.path.join(model_dir, 'config.json')):
-            print(f"  ✅ 找到直接路径: {model_dir}")
+        # 直接尝试加载配置来验证路径
+        try:
+            config = AutoConfig.from_pretrained(model_dir, trust_remote_code=True)
+            print(f"  ✅ 找到模型路径: {model_dir}")
             return model_dir
-        
-        # 检查snapshots子目录（Hugging Face Hub格式）
-        snapshots_dir = os.path.join(model_dir, 'snapshots')
-        if os.path.exists(snapshots_dir):
-            print(f"  📁 检查snapshots目录...")
-            for snapshot in os.listdir(snapshots_dir):
-                snapshot_path = os.path.join(snapshots_dir, snapshot)
-                if os.path.exists(os.path.join(snapshot_path, 'config.json')):
-                    print(f"  ✅ 找到snapshot路径: {snapshot_path}")
-                    return snapshot_path
-        
-        # 检查ModelScope格式（直接使用模型目录）
-        if os.path.exists(model_dir):
-            print(f"  📁 检查ModelScope格式...")
-            # 检查是否有任何模型文件
-            try:
-                files = os.listdir(model_dir)
-                model_indicators = ['config.json', 'tokenizer', 'model', '.bin', '.safetensors']
-                for file in files:
-                    for indicator in model_indicators:
-                        if indicator in file:
-                            print(f"  ✅ 找到ModelScope路径: {model_dir}")
-                            return model_dir
-            except Exception as e:
-                print(f"  ❌ 检查ModelScope格式时出错: {e}")
+        except Exception as e:
+            print(f"  ❌ 无法加载模型配置: {str(e)[:100]}...")
+            
+            # 检查snapshots子目录（Hugging Face Hub格式）
+            snapshots_dir = os.path.join(model_dir, 'snapshots')
+            if os.path.exists(snapshots_dir):
+                print(f"  📁 检查snapshots目录...")
+                for snapshot in os.listdir(snapshots_dir):
+                    snapshot_path = os.path.join(snapshots_dir, snapshot)
+                    try:
+                        config = AutoConfig.from_pretrained(snapshot_path, trust_remote_code=True)
+                        print(f"  ✅ 找到snapshot路径: {snapshot_path}")
+                        return snapshot_path
+                    except:
+                        continue
         
         print(f"  ❌ 未找到模型路径")
         return None
@@ -185,14 +160,31 @@ class ModelInfoDetector:
                 'transformers_version': getattr(config, 'transformers_version', None)
             }
             
+            # 尝试加载tokenizer获取更多信息
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+                info['tokenizer_type'] = type(tokenizer).__name__
+                info['vocab_size_from_tokenizer'] = tokenizer.vocab_size
+                info['pad_token'] = tokenizer.pad_token
+                info['eos_token'] = tokenizer.eos_token
+                info['bos_token'] = tokenizer.bos_token
+                print(f"  ✅ 成功加载tokenizer: {info['tokenizer_type']}")
+            except Exception as e:
+                print(f"  ⚠️  无法加载tokenizer: {str(e)[:100]}...")
+                info['tokenizer_type'] = None
+                info['vocab_size_from_tokenizer'] = None
+                info['pad_token'] = None
+                info['eos_token'] = None
+                info['bos_token'] = None
+            
             # 计算参数量
             try:
+                print(f"  🧠 正在加载模型计算参数量...")
                 # 尝试加载模型来计算参数量
-                from transformers import AutoModelForCausalLM
                 model = AutoModelForCausalLM.from_pretrained(
                     model_path, 
                     torch_dtype=torch.float16,
-                    device_map='auto',
+                    device_map='auto' if torch.cuda.is_available() else None,
                     trust_remote_code=True
                 )
                 
@@ -203,12 +195,15 @@ class ModelInfoDetector:
                 info['trainable_parameters'] = trainable_params
                 info['parameters_in_billions'] = total_params / 1e9
                 
+                print(f"  ✅ 参数量计算完成: {info['parameters_in_billions']:.2f}B")
+                
                 # 释放内存
                 del model
-                torch.cuda.empty_cache()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
                 
             except Exception as e:
-                print(f"计算参数量时出错: {e}")
+                print(f"  ❌ 计算参数量时出错: {str(e)[:100]}...")
                 info['total_parameters'] = None
                 info['trainable_parameters'] = None
                 info['parameters_in_billions'] = None
@@ -237,6 +232,13 @@ class ModelInfoDetector:
         print(f"  intermediate_size: {info['intermediate_size']}")
         print(f"  max_position_embeddings: {info['max_position_embeddings']}")
         print("-"*60)
+        print("Tokenizer信息:")
+        print(f"  tokenizer_type: {info.get('tokenizer_type', 'N/A')}")
+        print(f"  vocab_size_from_tokenizer: {info.get('vocab_size_from_tokenizer', 'N/A')}")
+        print(f"  pad_token: {info.get('pad_token', 'N/A')}")
+        print(f"  eos_token: {info.get('eos_token', 'N/A')}")
+        print(f"  bos_token: {info.get('bos_token', 'N/A')}")
+        print("-"*60)
         print("其他配置:")
         print(f"  rope_theta: {info['rope_theta']}")
         print(f"  rms_norm_eps: {info['rms_norm_eps']}")
@@ -263,7 +265,11 @@ class ModelInfoDetector:
         models = self.list_models()
         
         if not models:
-            print(f"在 {self.model_dir} 中没有找到模型")
+            print(f"在 {self.model_dir} 中没有找到模型————你可以参照@model_chat.py 读取模型的方式")
+            print("\n💡 提示:")
+            print("1. 确保模型目录包含有效的模型文件")
+            print("2. 模型目录应该包含 config.json 文件")
+            print("3. 可以使用 model_chat.py 来测试模型是否可用")
             return
         
         print(f"找到 {len(models)} 个模型:")
