@@ -81,21 +81,42 @@ class ModelDownloader:
         print("🏢 从ModelScope下载...")
         
         try:
-            # 使用modelscope命令行下载
-            cmd = [
-                sys.executable, "-m", "modelscope", "download",
-                "--model", model_name,
-                "--local_dir", str(save_dir)
-            ]
+            # 使用modelscope的Python API下载
+            from modelscope import snapshot_download
             
-            print(f"执行命令: {' '.join(cmd)}")
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            print(f"开始下载模型: {model_name}")
+            print(f"保存到: {save_dir}")
             
-            if result.returncode == 0:
-                print("✅ ModelScope下载完成")
-                return True
+            # 使用snapshot_download API
+            downloaded_path = snapshot_download(
+                model_id=model_name,
+                cache_dir=str(save_dir),
+                local_dir=str(save_dir)
+            )
+            
+            print(f"✅ ModelScope下载完成: {downloaded_path}")
+            return True
+                
+        except ImportError:
+            print("❌ ModelScope未安装，尝试安装...")
+            if self.install_modelscope():
+                # 重新尝试下载
+                try:
+                    from modelscope import snapshot_download
+                    
+                    print(f"重新开始下载模型: {model_name}")
+                    downloaded_path = snapshot_download(
+                        model_id=model_name,
+                        cache_dir=str(save_dir),
+                        local_dir=str(save_dir)
+                    )
+                    
+                    print(f"✅ ModelScope下载完成: {downloaded_path}")
+                    return True
+                except Exception as e:
+                    print(f"❌ ModelScope下载失败: {e}")
+                    return False
             else:
-                print(f"❌ ModelScope下载失败: {result.stderr}")
                 return False
                 
         except Exception as e:
