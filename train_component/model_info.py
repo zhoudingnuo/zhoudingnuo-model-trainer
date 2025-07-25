@@ -61,48 +61,94 @@ class ModelInfoDetector:
     
     def _is_model_directory(self, path):
         """检查目录是否包含模型文件"""
+        print(f"🔍 检查目录: {os.path.basename(path)}")
+        
         # 检查常见的模型文件
         model_files = [
             'config.json',
             'tokenizer.json', 
             'tokenizer_config.json',
             'pytorch_model.bin',
-            'model.safetensors'
+            'model.safetensors',
+            'tokenizer.model',  # sentencepiece tokenizer
+            'special_tokens_map.json'
         ]
         
         # 检查直接文件
         for file in model_files:
             if os.path.exists(os.path.join(path, file)):
+                print(f"  ✅ 找到模型文件: {file}")
                 return True
         
         # 检查snapshots子目录（Hugging Face Hub格式）
         snapshots_dir = os.path.join(path, 'snapshots')
         if os.path.exists(snapshots_dir):
+            print(f"  📁 检查snapshots目录...")
             for snapshot in os.listdir(snapshots_dir):
                 snapshot_path = os.path.join(snapshots_dir, snapshot)
                 if os.path.isdir(snapshot_path):
                     for file in model_files:
                         if os.path.exists(os.path.join(snapshot_path, file)):
+                            print(f"  ✅ 在snapshot中找到模型文件: {file}")
                             return True
         
+        # 检查ModelScope格式（直接包含模型文件）
+        print(f"  📁 检查ModelScope格式...")
+        try:
+            # 列出目录内容
+            files = os.listdir(path)
+            print(f"    目录内容: {files[:10]}...")  # 只显示前10个文件
+            
+            # 检查是否有任何模型相关文件
+            model_indicators = ['config.json', 'tokenizer', 'model', '.bin', '.safetensors']
+            for file in files:
+                for indicator in model_indicators:
+                    if indicator in file:
+                        print(f"  ✅ 找到模型指示文件: {file}")
+                        return True
+        except Exception as e:
+            print(f"  ❌ 检查目录时出错: {e}")
+        
+        print(f"  ❌ 未找到模型文件")
         return False
     
     def get_model_path(self, model_name):
         """获取模型的实际路径"""
         model_dir = os.path.join(self.model_dir, model_name)
         
+        print(f"🔍 查找模型路径: {model_name}")
+        
         # 检查直接路径
         if os.path.exists(os.path.join(model_dir, 'config.json')):
+            print(f"  ✅ 找到直接路径: {model_dir}")
             return model_dir
         
-        # 检查snapshots子目录
+        # 检查snapshots子目录（Hugging Face Hub格式）
         snapshots_dir = os.path.join(model_dir, 'snapshots')
         if os.path.exists(snapshots_dir):
+            print(f"  📁 检查snapshots目录...")
             for snapshot in os.listdir(snapshots_dir):
                 snapshot_path = os.path.join(snapshots_dir, snapshot)
                 if os.path.exists(os.path.join(snapshot_path, 'config.json')):
+                    print(f"  ✅ 找到snapshot路径: {snapshot_path}")
                     return snapshot_path
         
+        # 检查ModelScope格式（直接使用模型目录）
+        if os.path.exists(model_dir):
+            print(f"  📁 检查ModelScope格式...")
+            # 检查是否有任何模型文件
+            try:
+                files = os.listdir(model_dir)
+                model_indicators = ['config.json', 'tokenizer', 'model', '.bin', '.safetensors']
+                for file in files:
+                    for indicator in model_indicators:
+                        if indicator in file:
+                            print(f"  ✅ 找到ModelScope路径: {model_dir}")
+                            return model_dir
+            except Exception as e:
+                print(f"  ❌ 检查ModelScope格式时出错: {e}")
+        
+        print(f"  ❌ 未找到模型路径")
         return None
     
     def detect_model_info(self, model_name):
