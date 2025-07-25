@@ -78,11 +78,11 @@ class ModelDownloader:
             
             # 配置镜像
             import os
-            # 设置环境变量使用国内镜像
+            # 设置环境变量使用阿里镜像
             os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
             os.environ['HF_HUB_URL'] = 'https://hf-mirror.com'
             
-            # 设置huggingface_hub使用镜像
+            # 设置huggingface_hub使用阿里镜像
             try:
                 from huggingface_hub import set_http_backend
                 set_http_backend("https://hf-mirror.com")
@@ -107,7 +107,7 @@ class ModelDownloader:
                         local_files_only=False,
                         resume_download=True,
                         proxies=proxies,
-                        mirror='tuna',  # 使用清华镜像
+                        mirror='aliyun',  # 使用阿里镜像
                         use_auth_token=None
                     )
                     print("✅ tokenizer下载成功")
@@ -135,7 +135,7 @@ class ModelDownloader:
                         local_files_only=False,
                         resume_download=True,
                         proxies=proxies,
-                        mirror='tuna',  # 使用清华镜像
+                        mirror='aliyun',  # 使用阿里镜像
                         use_auth_token=None
                     )
                     print("✅ 模型下载成功")
@@ -176,8 +176,9 @@ class ModelDownloader:
             # 尝试不同的镜像URL
             mirror_urls = [
                 f"https://huggingface.co/{model_name}",
-                f"https://hf-mirror.com/{model_name}",
-                f"https://huggingface.co.cn/{model_name}"
+                f"https://hf-mirror.com/{model_name}",  # 阿里云镜像
+                f"https://huggingface.co.cn/{model_name}",
+                f"https://modelscope.cn/models/{model_name}"  # ModelScope镜像
             ]
             
             for url in mirror_urls:
