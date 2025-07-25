@@ -438,7 +438,9 @@ class ModelExpander:
                 "1b": {"hidden_size": 768, "num_hidden_layers": 12, "num_attention_heads": 12},
                 "1.8b": {"hidden_size": 1536, "num_hidden_layers": 30, "num_attention_heads": 12},
                 "3b": {"hidden_size": 1536, "num_hidden_layers": 24, "num_attention_heads": 24},
-                "7b": {"hidden_size": 4096, "num_hidden_layers": 32, "num_attention_heads": 32}
+                "7b": {"hidden_size": 4096, "num_hidden_layers": 32, "num_attention_heads": 32},
+                "9b": {"hidden_size": 4096, "num_hidden_layers": 36, "num_attention_heads": 32},
+                "soulchat-9b": {"hidden_size": 4096, "num_hidden_layers": 36, "num_attention_heads": 32}
             }
             
             if target_size not in size_mapping:
@@ -518,18 +520,23 @@ class ModelExpander:
     
     def _copy_weights_preserving_knowledge(self, original_model, new_model):
         """
-        复制权重，保留原模型知识
+        复制权重，保留原模型知识 - 优化版本
         """
         original_state_dict = original_model.state_dict()
         new_state_dict = new_model.state_dict()
         
-        # 获取原始和新的hidden_size
+        # 获取原始和新的配置
         orig_hidden_size = original_model.config.hidden_size
         new_hidden_size = new_model.config.hidden_size
+        orig_layers = original_model.config.num_hidden_layers
+        new_layers = new_model.config.num_hidden_layers
         
-        print(f"原始hidden_size: {orig_hidden_size}, 新hidden_size: {new_hidden_size}")
+        print(f"🔍 权重复制分析:")
+        print(f"  原始hidden_size: {orig_hidden_size}, 新hidden_size: {new_hidden_size}")
+        print(f"  原始层数: {orig_layers}, 新层数: {new_layers}")
+        print(f"  扩展层数: {new_layers - orig_layers}")
         
-        # 复制embedding层
+        # 1. 复制embedding层
         if 'model.embed_tokens.weight' in original_state_dict and 'model.embed_tokens.weight' in new_state_dict:
             orig_emb = original_state_dict['model.embed_tokens.weight']
             new_emb = new_state_dict['model.embed_tokens.weight']
@@ -538,24 +545,24 @@ class ModelExpander:
                 # 维度相同，直接复制
                 if orig_emb.shape[0] <= new_emb.shape[0]:
                     new_emb[:orig_emb.shape[0]] = orig_emb
-                    print(f"复制embedding层: {orig_emb.shape} -> {new_emb.shape}")
+                    print(f"✅ 复制embedding层: {orig_emb.shape} -> {new_emb.shape}")
+                else:
+                    print(f"⚠️  embedding层词汇表大小不匹配: {orig_emb.shape[0]} > {new_emb.shape[0]}")
             else:
                 # 维度不同，使用插值调整
                 new_emb = self._resize_embedding(orig_emb, new_hidden_size)
-                print(f"调整embedding层: {orig_emb.shape} -> {new_emb.shape}")
+                print(f"🔄 调整embedding层: {orig_emb.shape} -> {new_emb.shape}")
             
             new_state_dict['model.embed_tokens.weight'] = new_emb
         
-        # 复制transformer层
-        orig_layers = original_model.config.num_hidden_layers
-        new_layers = new_model.config.num_hidden_layers
-        
-        # 复制层数相同的部分
+        # 2. 复制transformer层 - 保持原有知识
         copy_layers = min(orig_layers, new_layers)
         copied_params = 0
         skipped_params = 0
         
+        print(f"📋 开始复制transformer层...")
         for i in range(copy_layers):
+            layer_copied = 0
             for key in original_state_dict.keys():
                 if f'.layers.{i}.' in key:
                     new_key = key.replace(f'.layers.{i}.', f'.layers.{i}.')
@@ -567,29 +574,87 @@ class ModelExpander:
                         if orig_param.shape == new_param.shape:
                             new_state_dict[new_key] = orig_param
                             copied_params += 1
+                            layer_copied += 1
                         else:
-                            # 维度不匹配，跳过这个参数
-                            print(f"跳过维度不匹配的参数: {key} {orig_param.shape} -> {new_param.shape}")
-                            skipped_params += 1
+                            # 维度不匹配，尝试智能调整
+                            if self._can_resize_parameter(orig_param, new_param):
+                                resized_param = self._resize_parameter(orig_param, new_param.shape)
+                                new_state_dict[new_key] = resized_param
+                                copied_params += 1
+                                layer_copied += 1
+                                print(f"🔄 调整参数维度: {key} {orig_param.shape} -> {new_param.shape}")
+                            else:
+                                print(f"⚠️  跳过维度不匹配的参数: {key} {orig_param.shape} -> {new_param.shape}")
+                                skipped_params += 1
+            
+            if layer_copied > 0:
+                print(f"  ✅ 层 {i}: 复制了 {layer_copied} 个参数")
         
-        print(f"复制了 {copy_layers} 层权重，成功复制 {copied_params} 个参数，跳过 {skipped_params} 个参数")
+        print(f"📊 权重复制统计:")
+        print(f"  复制层数: {copy_layers}/{orig_layers}")
+        print(f"  成功复制参数: {copied_params}")
+        print(f"  跳过参数: {skipped_params}")
         
-        # 复制输出层
-        if 'model.norm.weight' in original_state_dict and 'model.norm.weight' in new_state_dict:
-            new_state_dict['model.norm.weight'] = original_state_dict['model.norm.weight']
-        if 'model.norm.bias' in original_state_dict and 'model.norm.bias' in new_state_dict:
-            new_state_dict['model.norm.bias'] = original_state_dict['model.norm.bias']
+        # 3. 复制输出层
+        norm_copied = 0
+        for norm_key in ['model.norm.weight', 'model.norm.bias']:
+            if norm_key in original_state_dict and norm_key in new_state_dict:
+                new_state_dict[norm_key] = original_state_dict[norm_key]
+                norm_copied += 1
+        if norm_copied > 0:
+            print(f"✅ 复制输出归一化层: {norm_copied} 个参数")
         
-        # 复制lm_head
+        # 4. 复制lm_head
         if 'lm_head.weight' in original_state_dict and 'lm_head.weight' in new_state_dict:
-            new_state_dict['lm_head.weight'] = original_state_dict['lm_head.weight']
-            print(f"复制lm_head: {original_state_dict['lm_head.weight'].shape}")
+            orig_lm_head = original_state_dict['lm_head.weight']
+            new_lm_head = new_state_dict['lm_head.weight']
+            
+            if orig_lm_head.shape[0] <= new_lm_head.shape[0]:
+                new_lm_head[:orig_lm_head.shape[0]] = orig_lm_head
+                print(f"✅ 复制lm_head: {orig_lm_head.shape} -> {new_lm_head.shape}")
+            else:
+                print(f"⚠️  lm_head词汇表大小不匹配: {orig_lm_head.shape[0]} > {new_lm_head.shape[0]}")
         
-        # 加载权重到新模型
-        new_model.load_state_dict(new_state_dict, strict=False)
+        # 5. 加载权重到新模型
+        print("🔄 加载权重到新模型...")
+        missing_keys, unexpected_keys = new_model.load_state_dict(new_state_dict, strict=False)
         
-        # 初始化新增的层
-        self._initialize_new_layers(new_model, copy_layers, new_layers)
+        if missing_keys:
+            print(f"⚠️  缺失的键: {len(missing_keys)} 个")
+        if unexpected_keys:
+            print(f"⚠️  意外的键: {len(unexpected_keys)} 个")
+        
+        # 6. 智能初始化新增的层
+        if new_layers > orig_layers:
+            print(f"🧠 智能初始化新增的层 {orig_layers} 到 {new_layers-1}...")
+            self._initialize_new_layers_smart(new_model, orig_layers, new_layers)
+        
+        print("✅ 权重复制完成！")
+    
+    def _can_resize_parameter(self, orig_param, new_param):
+        """检查参数是否可以调整大小"""
+        # 只允许调整某些类型的参数
+        resizable_types = ['weight']
+        param_name = getattr(new_param, 'name', '')
+        return any(t in param_name for t in resizable_types)
+    
+    def _resize_parameter(self, orig_param, new_shape):
+        """调整参数大小"""
+        if len(orig_param.shape) == 2 and len(new_shape) == 2:
+            # 线性层权重
+            return torch.nn.functional.interpolate(
+                orig_param.unsqueeze(0), 
+                size=new_shape, 
+                mode='bilinear', 
+                align_corners=False
+            ).squeeze(0)
+        else:
+            # 其他参数，使用零填充或截断
+            new_param = torch.zeros(new_shape, device=orig_param.device, dtype=orig_param.dtype)
+            if len(orig_param.shape) == len(new_shape):
+                slices = tuple(slice(0, min(s1, s2)) for s1, s2 in zip(orig_param.shape, new_shape))
+                new_param[slices] = orig_param[slices]
+            return new_param
     
     def _resize_embedding(self, embedding, new_hidden_size):
         """
@@ -621,9 +686,102 @@ class ModelExpander:
         
         return new_embedding
     
+    def _initialize_new_layers_smart(self, model, start_layer, end_layer):
+        """
+        智能初始化新增的层 - 使用渐进式初始化策略
+        """
+        print(f"🧠 智能初始化新增的层 {start_layer} 到 {end_layer-1}")
+        
+        if start_layer >= end_layer:
+            print("⚠️  没有新增层需要初始化")
+            return
+        
+        # 获取参考层（使用最后一层作为参考）
+        reference_layer = model.model.layers[start_layer - 1]
+        print(f"📋 使用层 {start_layer-1} 作为初始化参考")
+        
+        # 计算初始化策略
+        total_new_layers = end_layer - start_layer
+        print(f"📊 需要初始化 {total_new_layers} 个新层")
+        
+        for i in range(start_layer, end_layer):
+            current_layer = model.model.layers[i]
+            layer_index = i - start_layer
+            
+            # 计算初始化权重（越后面的层，权重越接近参考层）
+            if total_new_layers > 1:
+                weight_factor = layer_index / (total_new_layers - 1)
+            else:
+                weight_factor = 1.0
+            
+            print(f"  🔧 初始化层 {i} (权重因子: {weight_factor:.2f})")
+            
+            # 1. 初始化注意力层
+            if hasattr(current_layer.self_attn, 'q_proj') and hasattr(reference_layer.self_attn, 'q_proj'):
+                # 使用参考层权重 + 小随机噪声
+                noise_scale = 0.01 * (1 - weight_factor)  # 越后面的层噪声越小
+                
+                for proj_name in ['q_proj', 'k_proj', 'v_proj', 'o_proj']:
+                    ref_proj = getattr(reference_layer.self_attn, proj_name)
+                    cur_proj = getattr(current_layer.self_attn, proj_name)
+                    
+                    if hasattr(ref_proj, 'weight') and hasattr(cur_proj, 'weight'):
+                        # 复制权重并添加噪声
+                        cur_proj.weight.data = ref_proj.weight.data.clone()
+                        if noise_scale > 0:
+                            noise = torch.randn_like(cur_proj.weight.data) * noise_scale
+                            cur_proj.weight.data += noise
+                        
+                        # 复制偏置（如果存在）
+                        if hasattr(ref_proj, 'bias') and hasattr(cur_proj, 'bias') and ref_proj.bias is not None:
+                            cur_proj.bias.data = ref_proj.bias.data.clone()
+                            if noise_scale > 0:
+                                noise = torch.randn_like(cur_proj.bias.data) * noise_scale
+                                cur_proj.bias.data += noise
+            
+            # 2. 初始化MLP层
+            if hasattr(current_layer.mlp, 'gate_proj') and hasattr(reference_layer.mlp, 'gate_proj'):
+                for proj_name in ['gate_proj', 'up_proj', 'down_proj']:
+                    ref_proj = getattr(reference_layer.mlp, proj_name)
+                    cur_proj = getattr(current_layer.mlp, proj_name)
+                    
+                    if hasattr(ref_proj, 'weight') and hasattr(cur_proj, 'weight'):
+                        # 复制权重并添加噪声
+                        cur_proj.weight.data = ref_proj.weight.data.clone()
+                        if noise_scale > 0:
+                            noise = torch.randn_like(cur_proj.weight.data) * noise_scale
+                            cur_proj.weight.data += noise
+                        
+                        # 复制偏置（如果存在）
+                        if hasattr(ref_proj, 'bias') and hasattr(cur_proj, 'bias') and ref_proj.bias is not None:
+                            cur_proj.bias.data = ref_proj.bias.data.clone()
+                            if noise_scale > 0:
+                                noise = torch.randn_like(cur_proj.bias.data) * noise_scale
+                                cur_proj.bias.data += noise
+            
+            # 3. 初始化层归一化
+            for norm_name in ['input_layernorm', 'post_attention_layernorm']:
+                if hasattr(current_layer, norm_name) and hasattr(reference_layer, norm_name):
+                    ref_norm = getattr(reference_layer, norm_name)
+                    cur_norm = getattr(current_layer, norm_name)
+                    
+                    # 复制权重
+                    if hasattr(ref_norm, 'weight') and hasattr(cur_norm, 'weight'):
+                        cur_norm.weight.data = ref_norm.weight.data.clone()
+                    
+                    # 复制偏置（RMSNorm没有bias，LayerNorm有bias）
+                    if hasattr(ref_norm, 'bias') and hasattr(cur_norm, 'bias') and ref_norm.bias is not None:
+                        cur_norm.bias.data = ref_norm.bias.data.clone()
+        
+        print(f"✅ 智能初始化完成！")
+        print(f"📈 初始化策略:")
+        print(f"  - 使用参考层权重作为基础")
+        print(f"  - 添加渐进式随机噪声")
+        print(f"  - 保持原有知识的同时增加多样性")
+    
     def _initialize_new_layers(self, model, start_layer, end_layer):
         """
-        初始化新增的层
+        初始化新增的层（保留原方法作为备用）
         """
         print(f"初始化新增的层 {start_layer} 到 {end_layer-1}")
         
@@ -1159,10 +1317,39 @@ class ModelExpander:
         if not self.load_model_and_tokenizer(self.selected_model_name):
             return
             
-        # 3. 选择扩展方式
+        # 3. 智能推荐扩展配置
+        print(f"\n🔍 智能分析模型: {self.selected_model_name}")
+        
+        # 分析当前模型配置
+        current_config = self.model.config
+        current_params = self.model.num_parameters() / 1e9
+        print(f"📊 当前模型信息:")
+        print(f"  - 模型类型: {getattr(current_config, 'model_type', 'unknown')}")
+        print(f"  - 隐藏层大小: {current_config.hidden_size}")
+        print(f"  - 层数: {current_config.num_hidden_layers}")
+        print(f"  - 注意力头数: {current_config.num_attention_heads}")
+        print(f"  - 参数量: {current_params:.2f}B")
+        
+        # 智能推荐
+        recommended_size = None
+        if "soulchat" in self.selected_model_name.lower() and current_params >= 7.5:
+            recommended_size = "soulchat-9b"
+            print(f"🎯 推荐配置: {recommended_size} (SoulChat专用优化)")
+        elif current_params >= 7.0:
+            recommended_size = "9b"
+            print(f"🎯 推荐配置: {recommended_size} (大模型扩展)")
+        elif current_params >= 3.0:
+            recommended_size = "7b"
+            print(f"🎯 推荐配置: {recommended_size} (中等模型扩展)")
+        else:
+            recommended_size = "3b"
+            print(f"🎯 推荐配置: {recommended_size} (小模型扩展)")
+        
         print("\n请选择扩展方式:")
         print("1. 使用预设大小")
         print("2. 自定义参数")
+        if recommended_size:
+            print(f"3. 使用推荐配置 ({recommended_size})")
         
         while True:
             try:
@@ -1170,7 +1357,7 @@ class ModelExpander:
                 if choice == 1:
                     # 使用预设大小
                     print("\n可用的扩展大小:")
-                    sizes = ["1b", "1.8b", "3b", "7b"]
+                    sizes = ["1b", "1.8b", "3b", "7b", "9b", "soulchat-9b"]
                     for i, size in enumerate(sizes, 1):
                         print(f"{i}. {size}")
                         
@@ -1226,6 +1413,12 @@ class ModelExpander:
                         "num_hidden_layers": num_layers,
                         "num_attention_heads": num_heads
                     }
+                    break
+                elif choice == 3 and recommended_size:
+                    # 使用推荐配置
+                    target_size = recommended_size
+                    custom_config = None
+                    print(f"✅ 使用推荐配置: {recommended_size}")
                     break
                 else:
                     print("无效选择，请重试")
