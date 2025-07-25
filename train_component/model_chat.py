@@ -25,6 +25,12 @@ class ModelChat:
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.conversation_stats = {
+            'total_generations': 0,
+            'total_tokens': 0,
+            'total_chinese_chars': 0,
+            'total_time': 0.0
+        }
         
     def list_available_models(self):
         """列出可用的本地模型"""
@@ -113,6 +119,11 @@ class ModelChat:
             return None
         
         try:
+            import time
+            
+            # 记录开始时间
+            start_time = time.time()
+            
             # 编码输入
             inputs = self.tokenizer.encode(prompt, return_tensors="pt")
             if self.device == "cuda":
@@ -130,12 +141,43 @@ class ModelChat:
                     repetition_penalty=1.1
                 )
             
+            # 记录结束时间
+            end_time = time.time()
+            generation_time = end_time - start_time
+            
             # 解码输出
             response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             
             # 移除原始提示，只返回生成的部分
             if response.startswith(prompt):
                 response = response[len(prompt):].strip()
+            
+            # 计算统计信息
+            input_tokens = len(inputs[0])
+            output_tokens = len(outputs[0]) - input_tokens
+            generated_text = response
+            
+            # 计算汉字数量（中文字符）
+            chinese_chars = sum(1 for char in generated_text if '\u4e00' <= char <= '\u9fff')
+            
+            # 计算生成速度
+            if generation_time > 0:
+                tokens_per_second = output_tokens / generation_time
+                chars_per_second = chinese_chars / generation_time
+            else:
+                tokens_per_second = 0
+                chars_per_second = 0
+            
+            # 保存统计信息
+            self.last_generation_stats = {
+                'generation_time': generation_time,
+                'input_tokens': input_tokens,
+                'output_tokens': output_tokens,
+                'total_tokens': len(outputs[0]),
+                'chinese_chars': chinese_chars,
+                'tokens_per_second': tokens_per_second,
+                'chars_per_second': chars_per_second
+            }
             
             return response
             
@@ -160,6 +202,19 @@ class ModelChat:
                 user_input = input("\n👤 您: ").strip()
                 
                 if user_input.lower() in ['quit', 'exit', '退出']:
+                    # 显示总体统计信息
+                    if self.conversation_stats['total_generations'] > 0:
+                        print(f"\n📈 本次对话总体统计:")
+                        print(f"   🎯 总对话次数: {self.conversation_stats['total_generations']}")
+                        print(f"   🔢 总生成tokens: {self.conversation_stats['total_tokens']}")
+                        print(f"   🇨🇳 总汉字数量: {self.conversation_stats['total_chinese_chars']}")
+                        print(f"   ⏱️  总生成时间: {self.conversation_stats['total_time']:.2f}秒")
+                        
+                        if self.conversation_stats['total_time'] > 0:
+                            avg_tokens_per_second = self.conversation_stats['total_tokens'] / self.conversation_stats['total_time']
+                            avg_chars_per_second = self.conversation_stats['total_chinese_chars'] / self.conversation_stats['total_time']
+                            print(f"   ⚡ 平均速度: {avg_tokens_per_second:.1f} tokens/秒, {avg_chars_per_second:.1f} 汉字/秒")
+                    
                     print("👋 再见！")
                     break
                 
@@ -178,6 +233,25 @@ class ModelChat:
                 
                 if response:
                     print(response)
+                    
+                    # 显示生成统计信息
+                    if hasattr(self, 'last_generation_stats'):
+                        stats = self.last_generation_stats
+                        print(f"\n📊 生成统计:")
+                        print(f"   ⏱️  生成时间: {stats['generation_time']:.2f}秒")
+                        print(f"   🔢 输入tokens: {stats['input_tokens']}")
+                        print(f"   🔢 输出tokens: {stats['output_tokens']}")
+                        print(f"   🔢 总tokens: {stats['total_tokens']}")
+                        print(f"   🇨🇳 汉字数量: {stats['chinese_chars']}")
+                        print(f"   ⚡ 生成速度: {stats['tokens_per_second']:.1f} tokens/秒")
+                        print(f"   ⚡ 汉字速度: {stats['chars_per_second']:.1f} 汉字/秒")
+                        
+                        # 更新总体统计
+                        self.conversation_stats['total_generations'] += 1
+                        self.conversation_stats['total_tokens'] += stats['output_tokens']
+                        self.conversation_stats['total_chinese_chars'] += stats['chinese_chars']
+                        self.conversation_stats['total_time'] += stats['generation_time']
+                    
                     # 更新对话历史
                     conversation_history.append(f"用户: {user_input}")
                     conversation_history.append(f"助手: {response}")
