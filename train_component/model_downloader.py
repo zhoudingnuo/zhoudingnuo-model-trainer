@@ -269,6 +269,13 @@ class ModelDownloader:
             print(f"开始下载模型: {model_name}")
             print(f"保存到: {save_dir}")
             
+            # 验证模型名称格式
+            if '/' not in model_name:
+                print(f"❌ ModelScope模型名称格式错误: {model_name}")
+                print("💡 ModelScope模型名称格式应为: namespace/name")
+                print("   例如: YIRONGCHEN/SoulChat2.0-Yi-1.5-9B")
+                return False
+            
             # 使用snapshot_download API
             downloaded_path = snapshot_download(
                 model_id=model_name,
@@ -313,8 +320,13 @@ class ModelDownloader:
             model_name: 模型名称
             source: 下载源 ("huggingface", "modelscope", "auto")
         """
-        # 创建保存目录
-        save_dir = self.model_dir / model_name.split('/')[-1]
+        # 创建保存目录 - 使用模型名称的最后一部分作为目录名
+        if '/' in model_name:
+            save_dir_name = model_name.split('/')[-1]
+        else:
+            save_dir_name = model_name
+        
+        save_dir = self.model_dir / save_dir_name
         save_dir.mkdir(parents=True, exist_ok=True)
         
         print(f"📥 开始下载模型: {model_name}")
@@ -501,6 +513,7 @@ def main():
     print("- YIRONGCHEN/SoulChat2.0-Yi-1.5-9B")
     print("- qwen/Qwen2.5-7B-Instruct")
     print("- THUDM/chatglm3-6b")
+    print("- YIRONGCHEN/SoulChat2.0-Llama-3.1-8B")
     print()
     print("Hugging Face:")
     print("- microsoft/DialoGPT-medium")
