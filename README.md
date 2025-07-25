@@ -27,7 +27,13 @@ pip install -r requirements.txt
 - 将训练数据放在 `data/` 文件夹中
 - 支持 `.jsonl` 格式
 
-3. **运行训练**
+3. **下载模型**
+```bash
+cd train_component
+python model_downloader.py
+```
+
+4. **运行训练**
 ```bash
 cd train_component
 python model_expansion.py
@@ -276,9 +282,71 @@ df -h
 - **功能建议**：提交 Feature Request
 - **技术交流**：加入讨论区
 
+## 📥 模型下载指南
+
+### 支持的下载源
+
+1. **ModelScope（推荐）**
+   - 阿里云模型社区，国内网络稳定
+   - 支持大部分开源模型
+   - 示例：`YIRONGCHEN/SoulChat2.0-Yi-1.5-9B`
+
+2. **Hugging Face**
+   - 全球最大的模型社区
+   - 部分模型可能需要登录
+   - 示例：`Qwen/Qwen2.5-7B-Instruct`
+
+### 模型下载步骤
+
+1. **启动下载器**
+```bash
+cd train_component
+python model_downloader.py
+```
+
+2. **选择下载源**
+   - 推荐选择 "1. 下载模型 (自动选择源)"
+   - 程序会自动检测网络环境选择最佳源
+
+3. **输入模型名称**
+   - ModelScope格式：`namespace/model_name`
+   - Hugging Face格式：`organization/model_name`
+
+### 登录问题解决
+
+如果遇到需要登录的模型，请按以下步骤操作：
+
+**Windows用户：**
+```bash
+scripts/setup_huggingface_login.bat
+```
+
+**Linux/Mac用户：**
+```bash
+chmod +x scripts/setup_huggingface_login.sh
+./scripts/setup_huggingface_login.sh
+```
+
+**手动登录：**
+1. 访问 https://huggingface.co/settings/tokens
+2. 创建新的访问令牌（选择 "read" 权限即可）
+3. 运行：`huggingface-cli login --token YOUR_TOKEN`
+
+### 推荐模型
+
+**中文对话模型：**
+- `THUDM/chatglm3-6b`
+- `baichuan-inc/Baichuan2-7B-Chat`
+- `Qwen/Qwen2.5-7B-Instruct`
+
+**英文对话模型：**
+- `microsoft/DialoGPT-medium`
+- `microsoft/DialoGPT-large`
+
 ---
 
 **🎯 提示**：
 - 首次使用建议在小数据集上测试
 - 云GPU训练记得及时停止实例节省费用
-- 定期备份训练好的模型 
+- 定期备份训练好的模型
+- 国内用户优先使用ModelScope下载源 

@@ -123,6 +123,31 @@ class ModelDownloader:
             except:
                 pass
             
+            # 检查模型是否需要登录
+            print("🔍 检查模型访问权限...")
+            try:
+                api = HfApi()
+                model_info = api.model_info(model_name)
+                print(f"✅ 模型信息获取成功: {model_info.modelId}")
+                print(f"   模型类型: {getattr(model_info, 'model_type', 'unknown')}")
+                print(f"   是否私有: {getattr(model_info, 'private', False)}")
+                
+                if getattr(model_info, 'private', False):
+                    print("⚠️  这是一个私有模型，需要登录才能下载")
+                    print("💡 解决方案:")
+                    print("   1. 使用Hugging Face CLI登录: huggingface-cli login")
+                    print("   2. 使用ModelScope下载源")
+                    print("   3. 寻找公开的替代模型")
+                    return False
+                    
+            except Exception as e:
+                print(f"⚠️  无法获取模型信息: {e}")
+                print("💡 可能的原因:")
+                print("   1. 模型不存在或名称错误")
+                print("   2. 模型需要登录访问")
+                print("   3. 网络连接问题")
+                print("🔄 继续尝试下载...")
+            
             print("🔤 下载tokenizer...")
             # 尝试不同的代理配置
             proxy_configs = [
@@ -147,8 +172,23 @@ class ModelDownloader:
                     print("✅ tokenizer下载成功")
                     break
                 except Exception as e:
-                    print(f"❌ 代理配置失败: {e}")
-                    continue
+                    error_msg = str(e)
+                    if "401" in error_msg or "Unauthorized" in error_msg:
+                        print("❌ 模型需要登录才能访问")
+                        print("💡 解决方案:")
+                        print("   1. 使用Hugging Face CLI登录:")
+                        print("      pip install huggingface_hub")
+                        print("      huggingface-cli login")
+                        print("   2. 使用ModelScope下载源")
+                        print("   3. 寻找公开的替代模型")
+                        return False
+                    elif "404" in error_msg or "Not Found" in error_msg:
+                        print("❌ 模型不存在或名称错误")
+                        print("💡 请检查模型名称是否正确")
+                        return False
+                    else:
+                        print(f"❌ 代理配置失败: {e}")
+                        continue
             else:
                 raise Exception("所有代理配置都失败了")
             tokenizer.save_pretrained(save_dir)
@@ -175,8 +215,23 @@ class ModelDownloader:
                     print("✅ 模型下载成功")
                     break
                 except Exception as e:
-                    print(f"❌ 模型下载代理配置失败: {e}")
-                    continue
+                    error_msg = str(e)
+                    if "401" in error_msg or "Unauthorized" in error_msg:
+                        print("❌ 模型需要登录才能访问")
+                        print("💡 解决方案:")
+                        print("   1. 使用Hugging Face CLI登录:")
+                        print("      pip install huggingface_hub")
+                        print("      huggingface-cli login")
+                        print("   2. 使用ModelScope下载源")
+                        print("   3. 寻找公开的替代模型")
+                        return False
+                    elif "404" in error_msg or "Not Found" in error_msg:
+                        print("❌ 模型不存在或名称错误")
+                        print("💡 请检查模型名称是否正确")
+                        return False
+                    else:
+                        print(f"❌ 模型下载代理配置失败: {e}")
+                        continue
             else:
                 raise Exception("所有模型下载代理配置都失败了")
             model.save_pretrained(save_dir)
