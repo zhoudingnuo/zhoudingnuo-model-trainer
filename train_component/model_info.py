@@ -11,8 +11,19 @@ from transformers import AutoConfig, AutoTokenizer
 import torch
 
 class ModelInfoDetector:
-    def __init__(self, model_dir="D:\\Model"):
-        self.model_dir = model_dir
+    def __init__(self, model_dir="../model"):
+        """
+        初始化模型信息检测器
+        
+        Args:
+            model_dir: 模型目录路径，默认为相对路径 ../model
+        """
+        # 获取脚本所在目录的上级目录中的model文件夹
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        if model_dir.startswith("../"):
+            self.model_dir = os.path.join(script_dir, model_dir)
+        else:
+            self.model_dir = model_dir
     
     def list_models(self):
         """列出模型文件夹中的所有模型"""
@@ -220,6 +231,9 @@ class ModelInfoDetector:
 
 def main():
     detector = ModelInfoDetector()
+    print(f"🔍 模型信息检测器")
+    print(f"📁 扫描目录: {detector.model_dir}")
+    print("=" * 50)
     detector.run_detection()
 
 if __name__ == "__main__":
