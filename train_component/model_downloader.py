@@ -377,24 +377,110 @@ class ModelDownloader:
             return []
         
         models = []
-        for model_path in self.model_dir.iterdir():
+        for i, model_path in enumerate(self.model_dir.iterdir(), 1):
             if model_path.is_dir():
                 info_file = model_path / "model_info.json"
                 if info_file.exists():
                     try:
                         with open(info_file, "r", encoding="utf-8") as f:
                             info = json.load(f)
-                        print(f"📁 {model_path.name}")
+                        print(f"{i}. 📁 {model_path.name}")
                         print(f"   原始名称: {info.get('name', 'Unknown')}")
                         print(f"   下载源: {info.get('source', 'Unknown')}")
                         print(f"   下载时间: {info.get('download_time', 'Unknown')}")
+                        
+                        # 计算模型大小
+                        size = self.get_model_size(model_path)
+                        print(f"   大小: {size}")
+                        
                         models.append(str(model_path))
                     except:
-                        print(f"📁 {model_path.name} (信息文件损坏)")
+                        print(f"{i}. 📁 {model_path.name} (信息文件损坏)")
+                        models.append(str(model_path))
                 else:
-                    print(f"📁 {model_path.name} (无信息文件)")
+                    print(f"{i}. 📁 {model_path.name} (无信息文件)")
+                    models.append(str(model_path))
         
         return models
+    
+    def get_model_size(self, model_path: Path):
+        """获取模型大小"""
+        try:
+            total_size = 0
+            file_count = 0
+            for file_path in model_path.rglob('*'):
+                if file_path.is_file():
+                    total_size += file_path.stat().st_size
+                    file_count += 1
+            
+            # 转换为可读格式
+            if total_size < 1024:
+                return f"{total_size} B"
+            elif total_size < 1024 * 1024:
+                return f"{total_size / 1024:.1f} KB"
+            elif total_size < 1024 * 1024 * 1024:
+                return f"{total_size / (1024 * 1024):.1f} MB"
+            else:
+                return f"{total_size / (1024 * 1024 * 1024):.1f} GB"
+        except:
+            return "未知"
+    
+    def delete_model(self, model_name: str):
+        """删除模型"""
+        model_path = self.model_dir / model_name
+        
+        if not model_path.exists():
+            print(f"❌ 模型不存在: {model_name}")
+            return False
+        
+        if not model_path.is_dir():
+            print(f"❌ 不是有效的模型目录: {model_name}")
+            return False
+        
+        # 显示模型信息
+        info_file = model_path / "model_info.json"
+        if info_file.exists():
+            try:
+                with open(info_file, "r", encoding="utf-8") as f:
+                    info = json.load(f)
+                print(f"🗑️  准备删除模型:")
+                print(f"   名称: {info.get('name', model_name)}")
+                print(f"   下载源: {info.get('source', 'Unknown')}")
+                print(f"   下载时间: {info.get('download_time', 'Unknown')}")
+                print(f"   大小: {self.get_model_size(model_path)}")
+            except:
+                print(f"🗑️  准备删除模型: {model_name}")
+        else:
+            print(f"🗑️  准备删除模型: {model_name}")
+        
+        # 确认删除
+        confirm = input("⚠️  确定要删除这个模型吗？(输入 'DELETE' 确认): ").strip()
+        if confirm != "DELETE":
+            print("❌ 删除已取消")
+            return False
+        
+        try:
+            import shutil
+            shutil.rmtree(model_path)
+            print(f"✅ 模型删除成功: {model_name}")
+            return True
+        except Exception as e:
+            print(f"❌ 删除失败: {e}")
+            return False
+    
+    def delete_model_by_index(self, index: int):
+        """根据索引删除模型"""
+        models = []
+        for model_path in self.model_dir.iterdir():
+            if model_path.is_dir():
+                models.append(model_path.name)
+        
+        if index < 1 or index > len(models):
+            print(f"❌ 无效的索引: {index}")
+            return False
+        
+        model_name = models[index - 1]
+        return self.delete_model(model_name)
 
 def main():
     """主函数"""
@@ -424,14 +510,15 @@ def main():
     print()
     
     while True:
-        print("请选择操作:")
+        print("\n请选择操作:")
         print("1. 下载模型 (自动选择源)")
         print("2. 从Hugging Face下载")
         print("3. 从ModelScope下载")
         print("4. 查看已下载模型")
-        print("5. 退出")
+        print("5. 删除模型")
+        print("6. 退出")
         
-        choice = input("\n请输入选择 (1-5): ").strip()
+        choice = input("\n请输入选择 (1-6): ").strip()
         
         if choice == "1":
             model_name = input("请输入模型名称: ").strip()
@@ -458,6 +545,41 @@ def main():
             downloader.list_downloaded_models()
             
         elif choice == "5":
+            print("\n🗑️  删除模型")
+            print("=" * 30)
+            models = downloader.list_downloaded_models()
+            
+            if not models:
+                print("❌ 没有可删除的模型")
+                continue
+            
+            print("\n选择删除方式:")
+            print("1. 按索引删除")
+            print("2. 按名称删除")
+            print("3. 返回主菜单")
+            
+            delete_choice = input("\n请输入选择 (1-3): ").strip()
+            
+            if delete_choice == "1":
+                try:
+                    index = int(input("请输入模型索引: ").strip())
+                    downloader.delete_model_by_index(index)
+                except ValueError:
+                    print("❌ 请输入有效的数字")
+                    
+            elif delete_choice == "2":
+                model_name = input("请输入模型名称: ").strip()
+                if model_name:
+                    downloader.delete_model(model_name)
+                else:
+                    print("❌ 模型名称不能为空")
+                    
+            elif delete_choice == "3":
+                continue
+            else:
+                print("❌ 无效的选择")
+            
+        elif choice == "6":
             print("👋 再见！")
             break
             
