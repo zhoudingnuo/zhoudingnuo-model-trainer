@@ -52,12 +52,19 @@ class ModelInfoDetector:
         
         print(f"✅ 模型目录存在，扫描中...")
         
-        for item in os.listdir(self.model_dir):
+        # 添加调试信息
+        all_items = os.listdir(self.model_dir)
+        print(f"📁 发现目录项: {all_items}")
+        
+        for item in all_items:
             item_path = os.path.join(self.model_dir, item)
             if os.path.isdir(item_path):
+                print(f"🔍 检查子目录: {item}")
                 # 检查是否是模型目录
                 if self._is_model_directory(item_path):
                     models.append(item)
+            else:
+                print(f"📄 跳过文件: {item}")
         
         return models
     
