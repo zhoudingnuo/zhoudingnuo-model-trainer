@@ -1,12 +1,13 @@
 import os
 import torch
 import torch.nn as nn
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig, TrainingArguments, Trainer
 from datasets import Dataset
 import json
 import glob
 from typing import List, Dict, Any
 import argparse
+from pathlib import Path
 
 class CustomTrainer(Trainer):
     """
@@ -146,52 +147,129 @@ class ModelExpander:
         
     def list_models(self) -> List[str]:
         """
-        列出模型文件夹中的所有模型 - 使用与model_chat.py相同的检测逻辑
+        列出模型文件夹中的所有模型 - 完全照抄model_downloader.py的方式
         
         Returns:
             模型路径列表
         """
-        if not os.path.exists(self.model_dir):
-            print(f"❌ 模型文件夹 {self.model_dir} 不存在")
-            return []
-            
-        print(f"🔍 扫描模型目录: {self.model_dir}")
-        models = []
+        print("📚 可用的模型:")
+        print("=" * 40)
         
-        for item in os.listdir(self.model_dir):
-            item_path = os.path.join(self.model_dir, item)
-            if os.path.isdir(item_path):
-                # 使用与model_chat.py相同的简单检测逻辑
-                config_file = os.path.join(item_path, "config.json")
-                tokenizer_file = os.path.join(item_path, "tokenizer.json")
-                
-                if os.path.exists(config_file):
-                    status = "✅ 完整模型" if os.path.exists(tokenizer_file) else "⚠️  部分模型"
-                    print(f"📁 找到模型: {item} ({status})")
-                    models.append(item)
+        if not os.path.exists(self.model_dir):
+            print("❌ 模型目录不存在")
+            return []
+        
+        models = []
+        model_dir_path = Path(self.model_dir)
+        
+        for i, model_path in enumerate(model_dir_path.iterdir(), 1):
+            if model_path.is_dir():
+                info_file = model_path / "model_info.json"
+                if info_file.exists():
+                    try:
+                        with open(info_file, "r", encoding="utf-8") as f:
+                            info = json.load(f)
+                        print(f"{i}. 📁 {model_path.name}")
+                        print(f"   原始名称: {info.get('name', 'Unknown')}")
+                        print(f"   下载源: {info.get('source', 'Unknown')}")
+                        print(f"   下载时间: {info.get('download_time', 'Unknown')}")
+                        
+                        # 计算模型大小
+                        size = self.get_model_size(model_path)
+                        print(f"   大小: {size}")
+                        
+                        # 显示详细模型信息
+                        self.show_model_details(model_path)
+                        
+                        models.append(str(model_path))
+                    except:
+                        print(f"{i}. 📁 {model_path.name} (信息文件损坏)")
+                        models.append(str(model_path))
                 else:
-                    # 检查snapshots子目录（Hugging Face Hub格式）
-                    snapshots_dir = os.path.join(item_path, 'snapshots')
-                    if os.path.exists(snapshots_dir):
-                        for snapshot in os.listdir(snapshots_dir):
-                            snapshot_path = os.path.join(snapshots_dir, snapshot)
-                            if os.path.isdir(snapshot_path):
-                                snapshot_config = os.path.join(snapshot_path, "config.json")
-                                if os.path.exists(snapshot_config):
-                                    print(f"📁 找到Hugging Face模型: {item}")
-                                    models.append(item)
-                                    break
-                    
-        if not models:
-            print("❌ 未找到任何模型")
-            print("💡 提示:")
-            print("1. 确保模型目录包含有效的模型文件")
-            print("2. 模型目录应该包含 config.json 文件")
-            print("3. 可以使用 model_chat.py 来测试模型是否可用")
-        else:
-            print(f"✅ 找到 {len(models)} 个模型")
-            
+                    print(f"{i}. 📁 {model_path.name} (无信息文件)")
+                    # 尝试显示模型详细信息
+                    self.show_model_details(model_path)
+                    models.append(str(model_path))
+        
         return models
+    
+    def show_model_details(self, model_path: Path):
+        """显示模型的详细信息 - 完全照抄model_downloader.py"""
+        try:
+            print(f"   🔍 正在分析模型信息...")
+            
+            # 尝试加载配置
+            config = AutoConfig.from_pretrained(str(model_path), trust_remote_code=True)
+            
+            print(f"   📊 模型配置:")
+            print(f"     模型类型: {getattr(config, 'model_type', 'unknown')}")
+            print(f"     隐藏层大小: {getattr(config, 'hidden_size', 'N/A')}")
+            print(f"     隐藏层数量: {getattr(config, 'num_hidden_layers', 'N/A')}")
+            print(f"     注意力头数: {getattr(config, 'num_attention_heads', 'N/A')}")
+            print(f"     词汇表大小: {getattr(config, 'vocab_size', 'N/A')}")
+            print(f"     最大位置编码: {getattr(config, 'max_position_embeddings', 'N/A')}")
+            
+            # 尝试加载tokenizer
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(str(model_path), trust_remote_code=True)
+                print(f"   🔤 Tokenizer信息:")
+                print(f"     Tokenizer类型: {type(tokenizer).__name__}")
+                print(f"     词汇表大小: {tokenizer.vocab_size}")
+                print(f"     Pad Token: {tokenizer.pad_token}")
+                print(f"     EOS Token: {tokenizer.eos_token}")
+                print(f"     BOS Token: {tokenizer.bos_token}")
+            except Exception as e:
+                print(f"   ⚠️  无法加载tokenizer: {str(e)[:50]}...")
+            
+            # 计算参数量
+            try:
+                print(f"   🧠 正在计算参数量...")
+                model = AutoModelForCausalLM.from_pretrained(
+                    str(model_path),
+                    torch_dtype=torch.float16,
+                    device_map='auto' if torch.cuda.is_available() else None,
+                    trust_remote_code=True
+                )
+                
+                total_params = sum(p.numel() for p in model.parameters())
+                trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+                
+                print(f"   📈 参数量:")
+                print(f"     总参数量: {total_params:,}")
+                print(f"     可训练参数: {trainable_params:,}")
+                print(f"     参数量(十亿): {total_params / 1e9:.2f}B")
+                
+                # 释放内存
+                del model
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    
+            except Exception as e:
+                print(f"   ⚠️  无法计算参数量: {str(e)[:50]}...")
+            
+        except Exception as e:
+            print(f"   ❌ 无法分析模型信息: {str(e)[:50]}...")
+        
+        print()  # 添加空行分隔
+    
+    def get_model_size(self, model_path: Path):
+        """获取模型大小 - 完全照抄model_downloader.py"""
+        try:
+            total_size = 0
+            for root, dirs, files in os.walk(model_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    total_size += os.path.getsize(file_path)
+            
+            # 转换为可读格式
+            if total_size >= 1024**3:
+                return f"{total_size / 1024**3:.1f} GB"
+            elif total_size >= 1024**2:
+                return f"{total_size / 1024**2:.1f} MB"
+            else:
+                return f"{total_size / 1024:.1f} KB"
+        except:
+            return "Unknown"
     
     def select_model(self) -> str:
         """
