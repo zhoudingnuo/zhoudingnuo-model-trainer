@@ -349,9 +349,13 @@ class ModelExpander:
         加载模型和分词器
         
         Args:
-            model_name: 模型名称
+            model_name: 模型名称或完整路径
         """
-        model_path = os.path.join(self.model_dir, model_name)
+        # 如果model_name已经是完整路径，直接使用；否则拼接路径
+        if os.path.isabs(model_name) or model_name.startswith('model/'):
+            model_path = model_name
+        else:
+            model_path = os.path.join(self.model_dir, model_name)
         
         try:
             print(f"正在加载模型: {model_path}")
