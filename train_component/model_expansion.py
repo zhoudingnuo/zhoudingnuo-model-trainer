@@ -577,9 +577,13 @@ class ModelExpander:
             new_config = custom_config
         
         # 创建新配置
-        new_model_config = original_config.__class__.from_pretrained(
-            os.path.join(self.model_dir, self.selected_model_name)
-        )
+        # 处理模型路径，避免重复
+        if self.selected_model_name.startswith('model/'):
+            model_path = self.selected_model_name
+        else:
+            model_path = os.path.join(self.model_dir, self.selected_model_name)
+        
+        new_model_config = original_config.__class__.from_pretrained(model_path)
         new_model_config.hidden_size = new_config["hidden_size"]
         new_model_config.num_hidden_layers = new_config["num_hidden_layers"]
         new_model_config.num_attention_heads = new_config["num_attention_heads"]
