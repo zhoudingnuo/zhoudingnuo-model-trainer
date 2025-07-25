@@ -115,13 +115,13 @@ class ModelChat:
             print(f"❌ 模型加载失败: {e}")
             return False
     
-    def generate_response(self, prompt: str, max_length: int = 512, temperature: float = 0.7):
+    def generate_response(self, prompt: str, max_new_tokens: int = 512, temperature: float = 0.7):
         """
         生成回复
         
         Args:
             prompt: 输入提示
-            max_length: 最大生成长度
+            max_new_tokens: 最大新生成token数量
             temperature: 温度参数
         """
         if self.model is None or self.tokenizer is None:
@@ -139,8 +139,7 @@ class ModelChat:
                 prompt, 
                 return_tensors="pt",
                 padding=True,
-                truncation=True,
-                max_length=max_length,
+                truncation=False,  # 不截断输入，让模型处理长输入
                 return_attention_mask=True
             )
             
@@ -156,7 +155,7 @@ class ModelChat:
                 outputs = self.model.generate(
                     input_ids,
                     attention_mask=attention_mask,
-                    max_length=max_length,
+                    max_new_tokens=max_new_tokens,  # 使用max_new_tokens而不是max_length
                     temperature=temperature,
                     do_sample=True,
                     pad_token_id=self.tokenizer.eos_token_id,
@@ -253,7 +252,7 @@ class ModelChat:
                 
                 # 生成回复
                 print("🤖 助手: ", end="", flush=True)
-                response = self.generate_response(full_prompt)
+                response = self.generate_response(full_prompt, max_new_tokens=1024)  # 增加生成长度
                 
                 if response:
                     print(response)
