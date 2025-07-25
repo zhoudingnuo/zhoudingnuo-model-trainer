@@ -619,13 +619,79 @@ class ModelExpander:
         
         # 清理GPU内存
         if torch.cuda.is_available():
+            print("   🧹 开始清理GPU内存...")
             torch.cuda.empty_cache()
-            print(f"   🧹 清理GPU内存，当前使用: {torch.cuda.memory_allocated(0) / 1024**3:.2f}GB")
+            torch.cuda.synchronize()
+            
+            # 强制垃圾回收
+            import gc
+            gc.collect()
+            
+            allocated = torch.cuda.memory_allocated(0) / 1024**3
+            total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"   🧹 GPU内存清理完成，当前使用: {allocated:.2f}GB / 总计 {total:.1f}GB")
+            
+            # 如果内存使用率仍然很高，尝试释放更多内存
+            if allocated / total > 0.1:  # 降低阈值，更积极地清理
+                print("   ⚠️  GPU内存使用率较高，尝试更激进的清理...")
+                
+                # 删除原模型以释放内存
+                if 'original_model' in locals():
+                    print("   🗑️  删除原模型释放内存...")
+                    del original_model
+                    torch.cuda.empty_cache()
+                    gc.collect()
+                
+                # 尝试释放更多缓存
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                gc.collect()
+                
+                allocated = torch.cuda.memory_allocated(0) / 1024**3
+                print(f"   🧹 激进清理完成，当前使用: {allocated:.2f}GB")
+                
+                # 如果还是很高，强制重置
+                if allocated / total > 0.15:
+                    print("   🚨 内存使用率仍然很高，强制重置CUDA缓存...")
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    gc.collect()
+                    
+                    # 尝试释放所有可能的缓存
+                    for obj in gc.get_objects():
+                        try:
+                            if torch.is_tensor(obj) and obj.is_cuda:
+                                del obj
+                        except:
+                            pass
+                    
+                    torch.cuda.empty_cache()
+                    allocated = torch.cuda.memory_allocated(0) / 1024**3
+                    print(f"   🧹 强制清理完成，当前使用: {allocated:.2f}GB")
         
         print("   🔄 正在创建新模型配置...")
         print("   ⏳ 这可能需要几分钟时间，请耐心等待...")
+        print("   💡 如果觉得太慢，可以按 Ctrl+C 中断，然后选择快速模式")
         
-        # 使用GPU优先的初始化方式
+        # 检查用户是否想要快速模式
+        try:
+            import select
+            import sys
+            
+            # 非阻塞检查用户输入
+            if select.select([sys.stdin], [], [], 0.1)[0]:
+                user_input = input().strip().lower()
+                if user_input in ['q', 'quit', 'exit', 'fast', '快速']:
+                    print("   🚀 用户选择快速模式，跳过权重复制...")
+                    # 直接创建新模型，不复制权重
+                    with torch.device('cpu'):
+                        new_model = AutoModelForCausalLM.from_config(new_model_config)
+                    print("   ✅ 快速模式完成")
+                    return True
+        except:
+            pass  # 如果没有输入，继续正常流程
+        
+        # 使用GPU优先的初始化方式，添加超时和进度监控
         if torch.cuda.is_available():
             total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
             allocated = torch.cuda.memory_allocated(0) / 1024**3
@@ -636,23 +702,66 @@ class ModelExpander:
             # 140GB GPU应该有足够内存，优先使用GPU
             if free_memory > 5.0:  # 保留5GB缓冲
                 print("   🚀 使用GPU创建模型（140GB显存，速度更快）...")
-                try:
-                    new_model = AutoModelForCausalLM.from_config(
-                        new_model_config,
-                        torch_dtype=torch.float16  # 使用float16节省内存
-                    )
+                print("   ⏳ 如果超过30秒没有响应，将自动切换到CPU模式...")
+                
+                # 添加超时机制
+                import threading
+                import time
+                
+                model_created = False
+                model_result = None
+                error_result = None
+                
+                def create_model():
+                    nonlocal model_created, model_result, error_result
+                    try:
+                        print("   🔄 开始创建模型...")
+                        model_result = AutoModelForCausalLM.from_config(
+                            new_model_config,
+                            torch_dtype=torch.float16  # 使用float16节省内存
+                        )
+                        model_created = True
+                        print("   ✅ GPU模型创建成功")
+                    except Exception as e:
+                        error_result = e
+                        print(f"   ❌ GPU创建失败: {e}")
+                
+                # 启动模型创建线程
+                model_thread = threading.Thread(target=create_model)
+                model_thread.daemon = True
+                model_thread.start()
+                
+                # 等待模型创建，最多30秒
+                start_time = time.time()
+                timeout = 30
+                
+                while not model_created and error_result is None:
+                    elapsed = time.time() - start_time
+                    if elapsed > timeout:
+                        print(f"   ⏰ 超时 ({timeout}秒)，切换到CPU模式...")
+                        break
+                    
+                    # 显示进度
+                    if elapsed > 5 and elapsed % 5 < 0.1:  # 每5秒显示一次进度
+                        print(f"   ⏳ 已等待 {elapsed:.1f}秒...")
+                    
+                    time.sleep(0.1)
+                
+                # 检查结果
+                if model_created:
+                    new_model = model_result
                     print("   ✅ 新模型配置创建完成")
-                except torch.cuda.OutOfMemoryError:
-                    print("   ⚠️  GPU内存不足，切换到CPU模式...")
+                elif error_result is not None:
+                    print("   ⚠️  GPU创建失败，切换到CPU模式...")
                     with torch.device('cpu'):
                         new_model = AutoModelForCausalLM.from_config(new_model_config)
                     print("   ✅ 新模型配置创建完成")
-                except Exception as e:
-                    print(f"   ⚠️  GPU创建失败: {e}")
-                    print("   🔄 切换到CPU模式...")
+                else:
+                    print("   ⏰  GPU创建超时，切换到CPU模式...")
                     with torch.device('cpu'):
                         new_model = AutoModelForCausalLM.from_config(new_model_config)
                     print("   ✅ 新模型配置创建完成")
+                    
             else:
                 print("   ⚠️  GPU内存不足，使用CPU模式...")
                 with torch.device('cpu'):
