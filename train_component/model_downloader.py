@@ -32,6 +32,28 @@ class ModelDownloader:
         except ImportError:
             return False
     
+    def check_huggingface_access(self):
+        """检查Hugging Face是否可访问"""
+        try:
+            import requests
+            test_urls = [
+                "https://huggingface.co",
+                "https://hf-mirror.com",
+                "https://huggingface.co.cn"
+            ]
+            
+            for url in test_urls:
+                try:
+                    response = requests.get(url, timeout=3)
+                    if response.status_code == 200:
+                        return True
+                except:
+                    continue
+            
+            return False
+        except:
+            return False
+    
     def install_modelscope(self):
         """安装ModelScope"""
         print("📦 正在安装ModelScope...")
@@ -60,21 +82,33 @@ class ModelDownloader:
             ]
             
             network_ok = False
+            working_url = None
             for url in test_urls:
                 try:
                     response = requests.get(url, timeout=5)
                     if response.status_code == 200:
                         print(f"✅ 网络连接正常: {url}")
                         network_ok = True
+                        working_url = url
                         break
                 except Exception as e:
                     print(f"❌ 连接失败: {url} - {e}")
                     continue
             
             if not network_ok:
-                print("⚠️  所有网络连接都失败")
-                print("💡 建议使用ModelScope下载源")
+                print("⚠️  所有Hugging Face镜像都无法访问")
+                print("💡 建议:")
+                print("   1. 使用ModelScope下载源")
+                print("   2. 检查网络连接")
+                print("   3. 配置VPN或代理")
                 return False
+            
+            # 设置工作镜像
+            if working_url:
+                import os
+                os.environ['HF_ENDPOINT'] = working_url
+                os.environ['HF_HUB_URL'] = working_url
+                print(f"🔧 使用镜像: {working_url}")
             
             # 配置镜像
             import os
@@ -347,18 +381,28 @@ class ModelDownloader:
             # 自动选择下载源
             print("🔄 自动选择下载源...")
             
-            # 优先尝试ModelScope（国内网络更稳定）
-            print("1️⃣ 优先尝试ModelScope下载...")
-            if not self.check_modelscope_installed():
-                if not self.install_modelscope():
-                    print("❌ ModelScope安装失败")
-                    return None
-            success = self.download_from_modelscope(model_name, save_dir)
+            # 检测网络环境
+            print("🔍 检测网络环境...")
+            hf_accessible = self.check_huggingface_access()
             
-            if not success:
-                # 如果ModelScope失败，尝试Hugging Face
-                print("2️⃣ ModelScope失败，尝试Hugging Face...")
+            if hf_accessible:
+                print("🌐 Hugging Face可访问，优先尝试...")
                 success = self.download_from_huggingface(model_name, save_dir)
+                
+                if not success:
+                    print("🔄 Hugging Face失败，尝试ModelScope...")
+                    if not self.check_modelscope_installed():
+                        if not self.install_modelscope():
+                            print("❌ ModelScope安装失败")
+                            return None
+                    success = self.download_from_modelscope(model_name, save_dir)
+            else:
+                print("🌐 Hugging Face不可访问，直接使用ModelScope...")
+                if not self.check_modelscope_installed():
+                    if not self.install_modelscope():
+                        print("❌ ModelScope安装失败")
+                        return None
+                success = self.download_from_modelscope(model_name, save_dir)
         
         if success:
             # 保存模型信息
@@ -507,6 +551,7 @@ def main():
     print("💡 建议:")
     print("- 国内用户优先使用ModelScope")
     print("- 如果网络不稳定，选择ModelScope下载源")
+    print("- 如果Hugging Face无法访问，程序会自动选择ModelScope")
     print()
     print("示例模型名称:")
     print("ModelScope（推荐）:")
