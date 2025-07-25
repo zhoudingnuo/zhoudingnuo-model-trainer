@@ -9,7 +9,7 @@ import sys
 import json
 import subprocess
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 import torch
 from datetime import datetime
 
