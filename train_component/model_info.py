@@ -62,66 +62,47 @@ class ModelInfoDetector:
         return models
     
     def _is_model_directory(self, path):
-        """检查目录是否包含模型文件 - 使用transformers库的方式"""
+        """检查目录是否包含模型文件 - 采用更宽松的检测方式"""
         print(f"🔍 检查目录: {os.path.basename(path)}")
         
+        # 如果目录存在且不是.gitkeep文件，就认为是模型目录
+        # 这是最宽松的检测方式，与model_downloader.py保持一致
         try:
-            # 尝试加载配置，这是最可靠的方式
-            config = AutoConfig.from_pretrained(path, trust_remote_code=True)
-            print(f"  ✅ 找到模型配置: {config.model_type}")
-            return True
-        except Exception as e:
-            print(f"  ❌ 无法加载模型配置: {str(e)[:100]}...")
+            files = os.listdir(path)
+            # 过滤掉.gitkeep等隐藏文件
+            model_files = [f for f in files if not f.startswith('.') and f != '.gitkeep']
             
-            # 备用检查：查看是否有常见的模型文件
-            model_files = [
-                'config.json',
-                'tokenizer.json', 
-                'tokenizer_config.json',
-                'pytorch_model.bin',
-                'model.safetensors',
-                'tokenizer.model',
-                'special_tokens_map.json'
-            ]
-            
-            found_files = []
-            for file in model_files:
-                if os.path.exists(os.path.join(path, file)):
-                    found_files.append(file)
-            
-            if found_files:
-                print(f"  ⚠️  找到模型文件: {found_files}")
+            if model_files:
+                print(f"  ✅ 找到模型文件: {model_files[:5]}...")  # 只显示前5个文件
                 return True
-            
-            print(f"  ❌ 未找到模型文件")
+            else:
+                print(f"  ⚠️  目录为空或只有隐藏文件")
+                return False
+                
+        except Exception as e:
+            print(f"  ❌ 检查目录时出错: {e}")
             return False
     
     def get_model_path(self, model_name):
-        """获取模型的实际路径"""
+        """获取模型的实际路径 - 采用更宽松的检测逻辑"""
         model_dir = os.path.join(self.model_dir, model_name)
         
         print(f"🔍 查找模型路径: {model_name}")
         
-        # 直接尝试加载配置来验证路径
-        try:
-            config = AutoConfig.from_pretrained(model_dir, trust_remote_code=True)
-            print(f"  ✅ 找到模型路径: {model_dir}")
-            return model_dir
-        except Exception as e:
-            print(f"  ❌ 无法加载模型配置: {str(e)[:100]}...")
-            
-            # 检查snapshots子目录（Hugging Face Hub格式）
-            snapshots_dir = os.path.join(model_dir, 'snapshots')
-            if os.path.exists(snapshots_dir):
-                print(f"  📁 检查snapshots目录...")
-                for snapshot in os.listdir(snapshots_dir):
-                    snapshot_path = os.path.join(snapshots_dir, snapshot)
-                    try:
-                        config = AutoConfig.from_pretrained(snapshot_path, trust_remote_code=True)
-                        print(f"  ✅ 找到snapshot路径: {snapshot_path}")
-                        return snapshot_path
-                    except:
-                        continue
+        # 采用更宽松的检测逻辑，只要目录存在且有文件就认为是模型
+        if os.path.exists(model_dir) and os.path.isdir(model_dir):
+            try:
+                files = os.listdir(model_dir)
+                # 过滤掉.gitkeep等隐藏文件
+                model_files = [f for f in files if not f.startswith('.') and f != '.gitkeep']
+                
+                if model_files:
+                    print(f"  ✅ 找到模型路径: {model_dir}")
+                    return model_dir
+                else:
+                    print(f"  ⚠️  目录为空或只有隐藏文件")
+            except Exception as e:
+                print(f"  ❌ 检查目录时出错: {e}")
         
         print(f"  ❌ 未找到模型路径")
         return None
