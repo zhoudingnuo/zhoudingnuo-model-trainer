@@ -21,7 +21,8 @@ class ModelInfoDetector:
         # 获取脚本所在目录的上级目录中的model文件夹
         script_dir = os.path.dirname(os.path.abspath(__file__))
         if model_dir.startswith("../"):
-            self.model_dir = os.path.join(script_dir, model_dir)
+            # 使用os.path.abspath来解析相对路径
+            self.model_dir = os.path.abspath(os.path.join(script_dir, model_dir))
         else:
             self.model_dir = model_dir
     
@@ -29,9 +30,25 @@ class ModelInfoDetector:
         """列出模型文件夹中的所有模型"""
         models = []
         
+        print(f"🔍 检查目录: {self.model_dir}")
         if not os.path.exists(self.model_dir):
-            print(f"模型目录不存在: {self.model_dir}")
+            print(f"❌ 模型目录不存在: {self.model_dir}")
+            # 尝试列出上级目录内容
+            parent_dir = os.path.dirname(self.model_dir)
+            if os.path.exists(parent_dir):
+                print(f"📁 上级目录 {parent_dir} 内容:")
+                try:
+                    for item in os.listdir(parent_dir):
+                        item_path = os.path.join(parent_dir, item)
+                        if os.path.isdir(item_path):
+                            print(f"  📂 {item}/")
+                        else:
+                            print(f"  📄 {item}")
+                except Exception as e:
+                    print(f"  无法列出目录内容: {e}")
             return models
+        
+        print(f"✅ 模型目录存在，扫描中...")
         
         for item in os.listdir(self.model_dir):
             item_path = os.path.join(self.model_dir, item)
