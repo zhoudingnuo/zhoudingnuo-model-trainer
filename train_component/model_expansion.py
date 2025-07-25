@@ -625,31 +625,56 @@ class ModelExpander:
         print("   🔄 正在创建新模型配置...")
         print("   ⏳ 这可能需要几分钟时间，请耐心等待...")
         
-        # 使用更快的初始化方式
-        try:
-            # 先尝试使用CPU创建，避免GPU内存问题
-            print("   🔄 使用CPU创建模型（更快更稳定）...")
-            with torch.device('cpu'):
-                new_model = AutoModelForCausalLM.from_config(
-                    new_model_config,
-                    torch_dtype=torch.float32  # 使用float32避免精度问题
-                )
-            print("   ✅ 新模型配置创建完成")
-        except Exception as e:
-            print(f"   ⚠️  CPU创建失败: {e}")
-            print("   🔄 尝试使用GPU创建...")
-            try:
-                new_model = AutoModelForCausalLM.from_config(new_model_config)
+        # 使用GPU优先的初始化方式
+        if torch.cuda.is_available():
+            total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            allocated = torch.cuda.memory_allocated(0) / 1024**3
+            free_memory = total_memory - allocated
+            
+            print(f"   💾 GPU内存状态: 已用 {allocated:.2f}GB / 总计 {total_memory:.1f}GB (可用 {free_memory:.2f}GB)")
+            
+            # 140GB GPU应该有足够内存，优先使用GPU
+            if free_memory > 5.0:  # 保留5GB缓冲
+                print("   🚀 使用GPU创建模型（140GB显存，速度更快）...")
+                try:
+                    new_model = AutoModelForCausalLM.from_config(
+                        new_model_config,
+                        torch_dtype=torch.float16  # 使用float16节省内存
+                    )
+                    print("   ✅ 新模型配置创建完成")
+                except torch.cuda.OutOfMemoryError:
+                    print("   ⚠️  GPU内存不足，切换到CPU模式...")
+                    with torch.device('cpu'):
+                        new_model = AutoModelForCausalLM.from_config(new_model_config)
+                    print("   ✅ 新模型配置创建完成")
+                except Exception as e:
+                    print(f"   ⚠️  GPU创建失败: {e}")
+                    print("   🔄 切换到CPU模式...")
+                    with torch.device('cpu'):
+                        new_model = AutoModelForCausalLM.from_config(new_model_config)
+                    print("   ✅ 新模型配置创建完成")
+            else:
+                print("   ⚠️  GPU内存不足，使用CPU模式...")
+                with torch.device('cpu'):
+                    new_model = AutoModelForCausalLM.from_config(new_model_config)
                 print("   ✅ 新模型配置创建完成")
-            except Exception as e2:
-                print(f"   ❌ GPU创建也失败: {e2}")
-                print("   💡 建议检查模型配置是否正确")
-                return False
+        else:
+            print("   🔄 未检测到GPU，使用CPU创建模型...")
+            new_model = AutoModelForCausalLM.from_config(new_model_config)
+            print("   ✅ 新模型配置创建完成")
         
-        # 先在CPU上初始化，避免GPU内存不足
-        print("   🔄 将模型移动到CPU...")
-        new_model = new_model.cpu()
-        print("   ✅ 模型已移动到CPU")
+        # 根据创建位置决定是否移动
+        if torch.cuda.is_available() and new_model.device.type == 'cuda':
+            print("   ✅ 模型已在GPU上，无需移动")
+        else:
+            print("   🔄 将模型移动到GPU...")
+            try:
+                new_model = new_model.to(self.device)
+                print("   ✅ 模型已移动到GPU")
+            except torch.cuda.OutOfMemoryError:
+                print("   ⚠️  GPU内存不足，保持在CPU上")
+                new_model = new_model.cpu()
+                print("   ✅ 模型保持在CPU上")
         
         # 复制原模型权重到新模型
         print("复制原模型权重...")
@@ -676,33 +701,36 @@ class ModelExpander:
             new_model = AutoModelForCausalLM.from_config(new_model_config)
             print("   ✅ 使用默认初始化完成")
         
-        # 替换模型并移动到GPU（使用device_map自动管理内存）
-        print("将模型移动到GPU...")
-        try:
-            print("   🔄 尝试直接移动到GPU...")
-            # 尝试使用device_map自动管理GPU内存
-            self.model = new_model.to(self.device)
-            print("   ✅ 模型已成功移动到GPU")
-        except torch.cuda.OutOfMemoryError:
-            print("   ⚠️  GPU内存不足，尝试使用device_map...")
+        # 设置最终模型位置
+        print("设置最终模型位置...")
+        if torch.cuda.is_available() and new_model.device.type == 'cuda':
+            print("   ✅ 模型已在GPU上，直接使用")
+            self.model = new_model
+        else:
+            print("   🔄 尝试将模型移动到GPU...")
             try:
-                print("   🔄 使用device_map自动分配内存...")
-                # 使用device_map自动分配内存
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    None, 
-                    config=new_model_config,
-                    state_dict=new_model.state_dict(),
-                    torch_dtype=torch.float16,
-                    device_map="auto",
-                    trust_remote_code=True
-                )
-                print("   ✅ device_map分配成功")
-            except Exception as e:
-                print(f"   ❌ device_map也失败: {e}")
-                print("   🔄 切换到CPU训练模式...")
-                self.model = new_model.cpu()
-                self.device = torch.device("cpu")
-                print("   ✅ 已切换到CPU训练模式")
+                self.model = new_model.to(self.device)
+                print("   ✅ 模型已成功移动到GPU")
+            except torch.cuda.OutOfMemoryError:
+                print("   ⚠️  GPU内存不足，尝试使用device_map...")
+                try:
+                    print("   🔄 使用device_map自动分配内存...")
+                    # 使用device_map自动分配内存
+                    self.model = AutoModelForCausalLM.from_pretrained(
+                        None, 
+                        config=new_model_config,
+                        state_dict=new_model.state_dict(),
+                        torch_dtype=torch.float16,
+                        device_map="auto",
+                        trust_remote_code=True
+                    )
+                    print("   ✅ device_map分配成功")
+                except Exception as e:
+                    print(f"   ❌ device_map也失败: {e}")
+                    print("   🔄 切换到CPU训练模式...")
+                    self.model = new_model.cpu()
+                    self.device = torch.device("cpu")
+                    print("   ✅ 已切换到CPU训练模式")
         
         print(f"模型扩展完成，新参数量: {self.model.num_parameters():,}")
         return True
