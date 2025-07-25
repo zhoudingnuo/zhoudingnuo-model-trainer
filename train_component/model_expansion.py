@@ -129,18 +129,20 @@ class CustomTrainer(Trainer):
         return optimizer
 
 class ModelExpander:
-    def __init__(self, model_dir: str = "D:\\Model", data_dir: str = "data"):
+    def __init__(self, model_dir: str = "../model", data_dir: str = "data"):
         """
         初始化模型扩展器
         
         Args:
-            model_dir: 模型文件夹路径
+            model_dir: 模型文件夹路径（相对于train_component目录）
             data_dir: 数据文件夹路径
         """
         self.model_dir = model_dir
         self.data_dir = data_dir
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"使用设备: {self.device}")
+        print(f"模型目录: {os.path.abspath(self.model_dir)}")
+        print(f"数据目录: {os.path.abspath(self.data_dir)}")
         
     def list_models(self) -> List[str]:
         """
@@ -1272,13 +1274,14 @@ class ModelExpander:
             return
         
         # 7. 开始训练
-        if target_size is not None:
-            output_dir = f"expanded_model_{self.selected_model_name}_{target_size}"
-        else:
-            output_dir = f"expanded_model_{self.selected_model_name}_custom_{custom_config['hidden_size']}h_{custom_config['num_hidden_layers']}l"
+        # 创建trained目录
+        trained_dir = os.path.join(self.model_dir, "trained")
+        os.makedirs(trained_dir, exist_ok=True)
         
-        if max_lines:
-            output_dir += f"_test{max_lines}"
+        # 使用固定的模型名称
+        output_dir = os.path.join(trained_dir, "chuxin1.0")
+        
+        print(f"训练后的模型将保存到: {output_dir}")
         
         if not self.train_expanded_model(output_dir, epochs, batch_size, tokenized_dataset):
             return
@@ -1290,7 +1293,7 @@ def main():
     主函数
     """
     parser = argparse.ArgumentParser(description="模型扩展训练脚本")
-    parser.add_argument("--model_dir", default="D:\\Model", help="模型文件夹路径")
+    parser.add_argument("--model_dir", default="../model", help="模型文件夹路径（相对于train_component目录）")
     parser.add_argument("--data_dir", default="data", help="数据文件夹路径")
     
     args = parser.parse_args()
