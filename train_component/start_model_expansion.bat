@@ -1,0 +1,6 @@
+@echo off
+echo Starting model expansion script...
+C:/Python313/python.exe model_expansion.py
+echo.
+echo Script execution completed, press any key to exit...
+pause >nul 

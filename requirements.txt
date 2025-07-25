@@ -1,0 +1,37 @@
+# 核心深度学习框架
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# Transformers库 - 模型加载和训练
+transformers>=4.30.0
+tokenizers>=0.13.0
+
+# 数据处理
+datasets>=2.12.0
+numpy>=1.24.0
+pandas>=2.0.0
+
+# 训练优化
+accelerate>=0.20.0
+peft>=0.4.0
+bitsandbytes>=0.41.0
+
+# 工具库
+tqdm>=4.65.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+scikit-learn>=1.3.0
+
+# 文件处理
+huggingface-hub>=0.15.0
+safetensors>=0.3.0
+
+# 系统工具
+psutil>=5.9.0
+GPUtil>=1.4.0
+
+# 可选：用于更好的性能
+# 如果安装失败可以注释掉
+# flash-attn>=2.0.0
+# xformers>=0.0.20 
