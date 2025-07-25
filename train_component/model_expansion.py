@@ -159,18 +159,38 @@ class ModelExpander:
             print("❌ 模型目录不存在")
             return []
         
+        print(f"🔍 扫描目录: {self.model_dir}")
+        print(f"🔍 绝对路径: {os.path.abspath(self.model_dir)}")
+        
         models = []
         model_dir_path = Path(self.model_dir)
         
-        for i, model_path in enumerate(model_dir_path.iterdir(), 1):
+        # 列出所有目录项
+        all_items = list(model_dir_path.iterdir())
+        print(f"📋 发现 {len(all_items)} 个目录项:")
+        for item in all_items:
+            print(f"   - {item.name} ({'目录' if item.is_dir() else '文件'})")
+        
+        for i, model_path in enumerate(all_items, 1):
             if model_path.is_dir():
+                print(f"\n🔍 检查目录 {i}: {model_path.name}")
+                
                 # 过滤掉训练输出目录
                 if model_path.name in ['trained', 'output', 'checkpoints', 'logs']:
-                    print(f"{i}. ⏭️  跳过训练目录: {model_path.name}")
+                    print(f"   ⏭️  跳过训练目录: {model_path.name}")
+                    continue
+                
+                # 列出目录内容
+                try:
+                    dir_contents = list(model_path.iterdir())
+                    print(f"   📁 目录内容: {[f.name for f in dir_contents[:10]]}...")
+                except Exception as e:
+                    print(f"   ❌ 无法读取目录内容: {e}")
                     continue
                 
                 info_file = model_path / "model_info.json"
                 if info_file.exists():
+                    print(f"   ✅ 找到model_info.json")
                     try:
                         with open(info_file, "r", encoding="utf-8") as f:
                             info = json.load(f)
@@ -187,21 +207,34 @@ class ModelExpander:
                         self.show_model_details(model_path)
                         
                         models.append(str(model_path))
-                    except:
+                    except Exception as e:
+                        print(f"   ❌ 读取model_info.json失败: {e}")
                         print(f"{i}. 📁 {model_path.name} (信息文件损坏)")
                         models.append(str(model_path))
                 else:
+                    print(f"   ⚠️  未找到model_info.json")
                     # 检查是否有config.json文件来确认是真正的模型
                     config_file = model_path / "config.json"
                     if config_file.exists():
+                        print(f"   ✅ 找到config.json，认为是模型")
                         print(f"{i}. 📁 {model_path.name} (无信息文件)")
                         # 尝试显示模型详细信息
                         self.show_model_details(model_path)
                         models.append(str(model_path))
                     else:
+                        print(f"   ❌ 未找到config.json")
                         print(f"{i}. ⏭️  跳过非模型目录: {model_path.name}")
                         continue
         
+        if not models:
+            print("\n❌ 未找到任何模型")
+            print("💡 提示:")
+            print("1. 确保模型目录包含有效的模型文件")
+            print("2. 模型目录应该包含 config.json 文件")
+            print("3. 可以使用 model_chat.py 来测试模型是否可用")
+        else:
+            print(f"\n✅ 找到 {len(models)} 个模型")
+            
         return models
     
     def show_model_details(self, model_path: Path):
