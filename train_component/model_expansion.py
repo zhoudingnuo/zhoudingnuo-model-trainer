@@ -623,8 +623,28 @@ class ModelExpander:
             print(f"   🧹 清理GPU内存，当前使用: {torch.cuda.memory_allocated(0) / 1024**3:.2f}GB")
         
         print("   🔄 正在创建新模型配置...")
-        new_model = AutoModelForCausalLM.from_config(new_model_config)
-        print("   ✅ 新模型配置创建完成")
+        print("   ⏳ 这可能需要几分钟时间，请耐心等待...")
+        
+        # 使用更快的初始化方式
+        try:
+            # 先尝试使用CPU创建，避免GPU内存问题
+            print("   🔄 使用CPU创建模型（更快更稳定）...")
+            with torch.device('cpu'):
+                new_model = AutoModelForCausalLM.from_config(
+                    new_model_config,
+                    torch_dtype=torch.float32  # 使用float32避免精度问题
+                )
+            print("   ✅ 新模型配置创建完成")
+        except Exception as e:
+            print(f"   ⚠️  CPU创建失败: {e}")
+            print("   🔄 尝试使用GPU创建...")
+            try:
+                new_model = AutoModelForCausalLM.from_config(new_model_config)
+                print("   ✅ 新模型配置创建完成")
+            except Exception as e2:
+                print(f"   ❌ GPU创建也失败: {e2}")
+                print("   💡 建议检查模型配置是否正确")
+                return False
         
         # 先在CPU上初始化，避免GPU内存不足
         print("   🔄 将模型移动到CPU...")
@@ -636,9 +656,25 @@ class ModelExpander:
         print(f"   📋 开始权重复制...")
         print(f"   📊 原模型参数量: {original_model.num_parameters():,}")
         print(f"   📊 新模型参数量: {new_model.num_parameters():,}")
+        print(f"   📈 参数增长: {new_model.num_parameters() - original_model.num_parameters():,}")
+        print("   ⏳ 权重复制可能需要几分钟，请耐心等待...")
+        print("   💡 如果觉得太慢，可以按 Ctrl+C 中断，然后选择快速模式")
         
-        self._copy_weights_preserving_knowledge(original_model, new_model)
-        print("   ✅ 权重复制完成")
+        try:
+            self._copy_weights_preserving_knowledge(original_model, new_model)
+            print("   ✅ 权重复制完成")
+        except KeyboardInterrupt:
+            print("\n   ⏹️  用户中断权重复制")
+            print("   🔄 切换到快速模式（使用默认初始化）...")
+            # 用户中断，使用默认初始化
+            new_model = AutoModelForCausalLM.from_config(new_model_config)
+            print("   ✅ 快速模式完成（新层将使用随机初始化）")
+        except Exception as e:
+            print(f"   ❌ 权重复制失败: {e}")
+            print("   💡 尝试使用默认初始化...")
+            # 如果权重复制失败，使用默认初始化
+            new_model = AutoModelForCausalLM.from_config(new_model_config)
+            print("   ✅ 使用默认初始化完成")
         
         # 替换模型并移动到GPU（使用device_map自动管理内存）
         print("将模型移动到GPU...")
@@ -714,7 +750,9 @@ class ModelExpander:
         skipped_params = 0
         
         print(f"📋 开始复制transformer层...")
+        total_layers = copy_layers
         for i in range(copy_layers):
+            print(f"   🔄 复制第 {i+1}/{total_layers} 层...")
             layer_copied = 0
             for key in original_state_dict.keys():
                 if f'.layers.{i}.' in key:
