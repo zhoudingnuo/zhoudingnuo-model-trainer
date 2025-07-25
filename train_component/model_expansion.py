@@ -1605,7 +1605,7 @@ def main():
     主函数
     """
     parser = argparse.ArgumentParser(description="模型扩展训练脚本")
-    parser.add_argument("--model_dir", default="../model", help="模型文件夹路径（相对于train_component目录）")
+    parser.add_argument("--model_dir", default="model", help="模型文件夹路径（相对于train_component目录）")
     parser.add_argument("--data_dir", default="data", help="数据文件夹路径")
     
     args = parser.parse_args()
