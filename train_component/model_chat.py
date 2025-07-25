@@ -115,13 +115,12 @@ class ModelChat:
             print(f"❌ 模型加载失败: {e}")
             return False
     
-    def generate_response(self, prompt: str, max_new_tokens: int = 512, temperature: float = 0.7):
+    def generate_response_stream(self, prompt: str, temperature: float = 0.7):
         """
-        生成回复
+        流式生成回复
         
         Args:
             prompt: 输入提示
-            max_new_tokens: 最大新生成token数量
             temperature: 温度参数
         """
         if self.model is None or self.tokenizer is None:
@@ -150,38 +149,51 @@ class ModelChat:
                 input_ids = input_ids.to(self.device)
                 attention_mask = attention_mask.to(self.device)
             
-            # 生成回复
+            # 流式生成回复
+            generated_text = ""
+            input_tokens = len(input_ids[0])
+            output_tokens = 0
+            chinese_chars = 0
+            
+            print("🤖 助手: ", end="", flush=True)
+            
             with torch.no_grad():
-                outputs = self.model.generate(
+                # 使用流式生成
+                for outputs in self.model.generate(
                     input_ids,
                     attention_mask=attention_mask,
-                    max_new_tokens=max_new_tokens,  # 使用max_new_tokens而不是max_length
+                    max_new_tokens=2048,  # 增加生成长度
                     temperature=temperature,
                     do_sample=True,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
                     repetition_penalty=1.1,
-                    use_cache=True
-                )
+                    use_cache=True,
+                    streamer=None,  # 不使用内置streamer，手动处理
+                    return_dict_in_generate=True,
+                    output_scores=False,
+                    output_hidden_states=False
+                ):
+                    # 获取新生成的token
+                    new_token_ids = outputs.sequences[0][input_tokens + output_tokens:]
+                    
+                    if len(new_token_ids) > 0:
+                        # 解码新token
+                        new_text = self.tokenizer.decode(new_token_ids, skip_special_tokens=True)
+                        
+                        # 实时输出
+                        print(new_text, end="", flush=True)
+                        generated_text += new_text
+                        output_tokens += len(new_token_ids)
+                        
+                        # 计算汉字数量
+                        chinese_chars = sum(1 for char in generated_text if '\u4e00' <= char <= '\u9fff')
+            
+            print()  # 换行
             
             # 记录结束时间
             end_time = time.time()
             generation_time = end_time - start_time
-            
-            # 解码输出
-            response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
-            # 移除原始提示，只返回生成的部分
-            if response.startswith(prompt):
-                response = response[len(prompt):].strip()
-            
-            # 计算统计信息
-            input_tokens = len(input_ids[0])
-            output_tokens = len(outputs[0]) - input_tokens
-            generated_text = response
-            
-            # 计算汉字数量（中文字符）
-            chinese_chars = sum(1 for char in generated_text if '\u4e00' <= char <= '\u9fff')
             
             # 计算生成速度
             if generation_time > 0:
@@ -196,13 +208,13 @@ class ModelChat:
                 'generation_time': generation_time,
                 'input_tokens': input_tokens,
                 'output_tokens': output_tokens,
-                'total_tokens': len(outputs[0]),
+                'total_tokens': input_tokens + output_tokens,
                 'chinese_chars': chinese_chars,
                 'tokens_per_second': tokens_per_second,
                 'chars_per_second': chars_per_second
             }
             
-            return response
+            return generated_text
             
         except Exception as e:
             print(f"❌ 生成回复失败: {e}")
@@ -250,12 +262,10 @@ class ModelChat:
                 else:
                     full_prompt = f"用户: {user_input}\n助手:"
                 
-                # 生成回复
-                print("🤖 助手: ", end="", flush=True)
-                response = self.generate_response(full_prompt, max_new_tokens=1024)  # 增加生成长度
+                # 流式生成回复
+                response = self.generate_response_stream(full_prompt)
                 
                 if response:
-                    print(response)
                     
                     # 显示生成统计信息
                     if hasattr(self, 'last_generation_stats'):
