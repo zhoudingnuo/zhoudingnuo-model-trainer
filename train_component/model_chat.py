@@ -158,8 +158,8 @@ class ModelChat:
             print("🤖 助手: ", end="", flush=True)
             
             with torch.no_grad():
-                # 使用流式生成
-                for outputs in self.model.generate(
+                # 直接生成完整回复
+                outputs = self.model.generate(
                     input_ids,
                     attention_mask=attention_mask,
                     max_new_tokens=2048,  # 增加生成长度
@@ -168,26 +168,26 @@ class ModelChat:
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
                     repetition_penalty=1.1,
-                    use_cache=True,
-                    streamer=None,  # 不使用内置streamer，手动处理
-                    return_dict_in_generate=True,
-                    output_scores=False,
-                    output_hidden_states=False
-                ):
-                    # 获取新生成的token
-                    new_token_ids = outputs.sequences[0][input_tokens + output_tokens:]
-                    
-                    if len(new_token_ids) > 0:
-                        # 解码新token
-                        new_text = self.tokenizer.decode(new_token_ids, skip_special_tokens=True)
-                        
-                        # 实时输出
-                        print(new_text, end="", flush=True)
-                        generated_text += new_text
-                        output_tokens += len(new_token_ids)
-                        
-                        # 计算汉字数量
-                        chinese_chars = sum(1 for char in generated_text if '\u4e00' <= char <= '\u9fff')
+                    use_cache=True
+                )
+                
+                # 解码输出
+                generated_text = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+                
+                # 移除原始提示，只返回生成的部分
+                if generated_text.startswith(prompt):
+                    generated_text = generated_text[len(prompt):].strip()
+                
+                # 模拟流式输出
+                print("🤖 助手: ", end="", flush=True)
+                for char in generated_text:
+                    print(char, end="", flush=True)
+                    import time
+                    time.sleep(0.01)  # 添加小延迟模拟打字效果
+                
+                # 计算统计信息
+                output_tokens = len(outputs[0]) - input_tokens
+                chinese_chars = sum(1 for char in generated_text if '\u4e00' <= char <= '\u9fff')
             
             print()  # 换行
             
