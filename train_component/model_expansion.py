@@ -146,54 +146,51 @@ class ModelExpander:
         
     def list_models(self) -> List[str]:
         """
-        列出模型文件夹中的所有模型
+        列出模型文件夹中的所有模型 - 使用与model_chat.py相同的检测逻辑
         
         Returns:
             模型路径列表
         """
         if not os.path.exists(self.model_dir):
-            print(f"模型文件夹 {self.model_dir} 不存在")
+            print(f"❌ 模型文件夹 {self.model_dir} 不存在")
             return []
             
+        print(f"🔍 扫描模型目录: {self.model_dir}")
         models = []
+        
         for item in os.listdir(self.model_dir):
             item_path = os.path.join(self.model_dir, item)
             if os.path.isdir(item_path):
-                # 检查是否包含模型文件
-                try:
-                    files = os.listdir(item_path)
+                # 使用与model_chat.py相同的简单检测逻辑
+                config_file = os.path.join(item_path, "config.json")
+                tokenizer_file = os.path.join(item_path, "tokenizer.json")
+                
+                if os.path.exists(config_file):
+                    status = "✅ 完整模型" if os.path.exists(tokenizer_file) else "⚠️  部分模型"
+                    print(f"📁 找到模型: {item} ({status})")
+                    models.append(item)
+                else:
+                    # 检查snapshots子目录（Hugging Face Hub格式）
+                    snapshots_dir = os.path.join(item_path, 'snapshots')
+                    if os.path.exists(snapshots_dir):
+                        for snapshot in os.listdir(snapshots_dir):
+                            snapshot_path = os.path.join(snapshots_dir, snapshot)
+                            if os.path.isdir(snapshot_path):
+                                snapshot_config = os.path.join(snapshot_path, "config.json")
+                                if os.path.exists(snapshot_config):
+                                    print(f"📁 找到Hugging Face模型: {item}")
+                                    models.append(item)
+                                    break
                     
-                    # 检查是否是Hugging Face Hub格式（包含snapshots文件夹）
-                    if 'snapshots' in files:
-                        # 检查snapshots文件夹中的内容
-                        snapshots_path = os.path.join(item_path, 'snapshots')
-                        if os.path.exists(snapshots_path):
-                            snapshot_dirs = os.listdir(snapshots_path)
-                            if snapshot_dirs:
-                                # 检查第一个snapshot目录
-                                first_snapshot = os.path.join(snapshots_path, snapshot_dirs[0])
-                                if os.path.exists(first_snapshot):
-                                    snapshot_files = os.listdir(first_snapshot)
-                                    model_files = [f for f in snapshot_files if f.endswith(('.bin', '.safetensors', '.pt', '.pth'))]
-                                    config_files = [f for f in snapshot_files if f in ('config.json', 'tokenizer.json', 'tokenizer_config.json')]
-                                    
-                                    if model_files or config_files:
-                                        models.append(item)
-                                        print(f"找到Hugging Face模型: {item}")
-                                        continue
-                    
-                    # 检查常见的模型文件扩展名
-                    model_files = [f for f in files if f.endswith(('.bin', '.safetensors', '.pt', '.pth'))]
-                    # 或者检查是否包含配置文件
-                    config_files = [f for f in files if f in ('config.json', 'tokenizer.json', 'tokenizer_config.json')]
-                    
-                    if model_files or config_files:
-                        models.append(item)
-                        print(f"找到模型: {item}")
-                except Exception as e:
-                    print(f"检查文件夹 {item} 时出错: {e}")
-                    continue
-                    
+        if not models:
+            print("❌ 未找到任何模型")
+            print("💡 提示:")
+            print("1. 确保模型目录包含有效的模型文件")
+            print("2. 模型目录应该包含 config.json 文件")
+            print("3. 可以使用 model_chat.py 来测试模型是否可用")
+        else:
+            print(f"✅ 找到 {len(models)} 个模型")
+            
         return models
     
     def select_model(self) -> str:
