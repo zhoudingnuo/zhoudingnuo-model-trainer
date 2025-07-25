@@ -134,13 +134,30 @@ class ModelChat:
             start_time = time.time()
             
             # 编码输入，明确设置attention_mask
-            tokenized = self.tokenizer(
-                prompt, 
-                return_tensors="pt",
-                padding=True,
-                truncation=False,  # 不截断输入，让模型处理长输入
-                return_attention_mask=True
-            )
+            try:
+                tokenized = self.tokenizer(
+                    prompt, 
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=False,  # 不截断输入，让模型处理长输入
+                    return_attention_mask=True
+                )
+            except Exception as e:
+                print(f"❌ 输入编码失败: {e}")
+                # 尝试清理输入
+                cleaned_prompt = prompt.strip()
+                if len(cleaned_prompt) == 0:
+                    print("❌ 输入为空")
+                    return None
+                
+                tokenized = self.tokenizer(
+                    cleaned_prompt, 
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,  # 如果清理后还是失败，允许截断
+                    max_length=2048,   # 限制最大长度
+                    return_attention_mask=True
+                )
             
             input_ids = tokenized['input_ids']
             attention_mask = tokenized['attention_mask']
@@ -169,9 +186,7 @@ class ModelChat:
                     eos_token_id=self.tokenizer.eos_token_id,
                     repetition_penalty=1.3,  # 增加重复惩罚
                     use_cache=True,
-                    no_repeat_ngram_size=3,  # 避免重复的n-gram
-                    early_stopping=True,     # 早期停止
-                    length_penalty=0.8       # 长度惩罚
+                    no_repeat_ngram_size=3   # 避免重复的n-gram
                 )
                 
                 # 解码输出
@@ -267,9 +282,14 @@ class ModelChat:
                 if conversation_history:
                     # 限制历史长度，避免上下文过长
                     recent_history = conversation_history[-4:]  # 只保留最近2轮对话
-                    full_prompt = "\n".join(recent_history) + f"\n用户: {user_input}\n助手: 请直接回答用户的问题，不要自问自答。"
+                    full_prompt = "\n".join(recent_history) + f"\n用户: {user_input.strip()}\n助手: 请直接回答用户的问题，不要自问自答。"
                 else:
-                    full_prompt = f"用户: {user_input}\n助手: 请直接回答用户的问题，不要自问自答。"
+                    full_prompt = f"用户: {user_input.strip()}\n助手: 请直接回答用户的问题，不要自问自答。"
+                
+                # 确保提示不为空
+                if not full_prompt.strip():
+                    print("❌ 提示为空")
+                    continue
                 
                 # 流式生成回复
                 response = self.generate_response_stream(full_prompt)
