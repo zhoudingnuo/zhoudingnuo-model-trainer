@@ -691,7 +691,7 @@ class ModelExpander:
         except:
             pass  # 如果没有输入，继续正常流程
         
-        # 使用GPU优先的初始化方式，添加超时和进度监控
+        # 140GB GPU专用优化策略
         if torch.cuda.is_available():
             total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
             allocated = torch.cuda.memory_allocated(0) / 1024**3
@@ -699,91 +699,62 @@ class ModelExpander:
             
             print(f"   💾 GPU内存状态: 已用 {allocated:.2f}GB / 总计 {total_memory:.1f}GB (可用 {free_memory:.2f}GB)")
             
-            # 140GB GPU应该有足够内存，优先使用GPU
-            if free_memory > 5.0:  # 保留5GB缓冲
-                print("   🚀 使用GPU创建模型（140GB显存，速度更快）...")
-                print("   ⏳ 如果超过30秒没有响应，将自动切换到CPU模式...")
-                
-                # 添加超时机制
-                import threading
-                import time
-                
-                model_created = False
-                model_result = None
-                error_result = None
-                
-                def create_model():
-                    nonlocal model_created, model_result, error_result
-                    try:
-                        print("   🔄 开始创建模型...")
-                        model_result = AutoModelForCausalLM.from_config(
-                            new_model_config,
-                            torch_dtype=torch.float16  # 使用float16节省内存
-                        )
-                        model_created = True
-                        print("   ✅ GPU模型创建成功")
-                    except Exception as e:
-                        error_result = e
-                        print(f"   ❌ GPU创建失败: {e}")
-                
-                # 启动模型创建线程
-                model_thread = threading.Thread(target=create_model)
-                model_thread.daemon = True
-                model_thread.start()
-                
-                # 等待模型创建，最多30秒
-                start_time = time.time()
-                timeout = 30
-                
-                while not model_created and error_result is None:
-                    elapsed = time.time() - start_time
-                    if elapsed > timeout:
-                        print(f"   ⏰ 超时 ({timeout}秒)，切换到CPU模式...")
-                        break
-                    
-                    # 显示进度
-                    if elapsed > 5 and elapsed % 5 < 0.1:  # 每5秒显示一次进度
-                        print(f"   ⏳ 已等待 {elapsed:.1f}秒...")
-                    
-                    time.sleep(0.1)
-                
-                # 检查结果
-                if model_created:
-                    new_model = model_result
-                    print("   ✅ 新模型配置创建完成")
-                elif error_result is not None:
-                    print("   ⚠️  GPU创建失败，切换到CPU模式...")
-                    with torch.device('cpu'):
-                        new_model = AutoModelForCausalLM.from_config(new_model_config)
-                    print("   ✅ 新模型配置创建完成")
-                else:
-                    print("   ⏰  GPU创建超时，切换到CPU模式...")
-                    with torch.device('cpu'):
-                        new_model = AutoModelForCausalLM.from_config(new_model_config)
-                    print("   ✅ 新模型配置创建完成")
-                    
-            else:
-                print("   ⚠️  GPU内存不足，使用CPU模式...")
-                with torch.device('cpu'):
-                    new_model = AutoModelForCausalLM.from_config(new_model_config)
-                print("   ✅ 新模型配置创建完成")
-        else:
-            print("   🔄 未检测到GPU，使用CPU创建模型...")
-            new_model = AutoModelForCausalLM.from_config(new_model_config)
-            print("   ✅ 新模型配置创建完成")
-        
-        # 根据创建位置决定是否移动
-        if torch.cuda.is_available() and new_model.device.type == 'cuda':
-            print("   ✅ 模型已在GPU上，无需移动")
-        else:
-            print("   🔄 将模型移动到GPU...")
+            # 140GB GPU，直接使用GPU，不降级到CPU
+            print("   🚀 140GB GPU火力全开，使用GPU创建模型...")
+            print("   ⏳ 模型创建可能需要一些时间，请耐心等待...")
+            
+            # 使用更激进的GPU优化
             try:
-                new_model = new_model.to(self.device)
-                print("   ✅ 模型已移动到GPU")
-            except torch.cuda.OutOfMemoryError:
-                print("   ⚠️  GPU内存不足，保持在CPU上")
-                new_model = new_model.cpu()
-                print("   ✅ 模型保持在CPU上")
+                # 设置CUDA优化
+                torch.backends.cudnn.benchmark = True
+                torch.backends.cudnn.deterministic = False
+                
+                print("   🔧 启用CUDA优化...")
+                
+                # 直接创建，不使用线程（避免线程开销）
+                print("   🔄 开始创建模型...")
+                new_model = AutoModelForCausalLM.from_config(
+                    new_model_config,
+                    torch_dtype=torch.float16,  # 使用float16节省内存
+                    low_cpu_mem_usage=True,     # 低CPU内存使用
+                )
+                print("   ✅ GPU模型创建成功")
+                
+            except Exception as e:
+                print(f"   ❌ GPU创建失败: {e}")
+                print("   🔄 尝试使用更保守的设置...")
+                
+                # 如果失败，尝试更保守的设置
+                try:
+                    new_model = AutoModelForCausalLM.from_config(
+                        new_model_config,
+                        torch_dtype=torch.float32,  # 使用float32
+                    )
+                    print("   ✅ GPU模型创建成功（保守模式）")
+                except Exception as e2:
+                    print(f"   ❌ 保守模式也失败: {e2}")
+                    print("   💡 建议检查模型配置或重启程序")
+                    return False
+                    
+        else:
+            print("   ❌ 未检测到GPU，无法使用GPU创建模型")
+            return False
+        
+        # 确保模型在GPU上
+        if torch.cuda.is_available():
+            if new_model.device.type != 'cuda':
+                print("   🔄 将模型移动到GPU...")
+                try:
+                    new_model = new_model.to(self.device)
+                    print("   ✅ 模型已移动到GPU")
+                except Exception as e:
+                    print(f"   ❌ 模型移动到GPU失败: {e}")
+                    return False
+            else:
+                print("   ✅ 模型已在GPU上")
+        else:
+            print("   ❌ 未检测到GPU，无法继续")
+            return False
         
         # 复制原模型权重到新模型
         print("复制原模型权重...")
@@ -810,36 +781,21 @@ class ModelExpander:
             new_model = AutoModelForCausalLM.from_config(new_model_config)
             print("   ✅ 使用默认初始化完成")
         
-        # 设置最终模型位置
+        # 设置最终模型位置 - 140GB GPU专用
         print("设置最终模型位置...")
-        if torch.cuda.is_available() and new_model.device.type == 'cuda':
-            print("   ✅ 模型已在GPU上，直接使用")
+        if torch.cuda.is_available():
+            print("   ✅ 140GB GPU，直接使用GPU模式")
             self.model = new_model
+            
+            # 确保模型在GPU上
+            if self.model.device.type != 'cuda':
+                print("   🔄 确保模型在GPU上...")
+                self.model = self.model.to(self.device)
+            
+            print("   ✅ 模型已成功设置在GPU上")
         else:
-            print("   🔄 尝试将模型移动到GPU...")
-            try:
-                self.model = new_model.to(self.device)
-                print("   ✅ 模型已成功移动到GPU")
-            except torch.cuda.OutOfMemoryError:
-                print("   ⚠️  GPU内存不足，尝试使用device_map...")
-                try:
-                    print("   🔄 使用device_map自动分配内存...")
-                    # 使用device_map自动分配内存
-                    self.model = AutoModelForCausalLM.from_pretrained(
-                        None, 
-                        config=new_model_config,
-                        state_dict=new_model.state_dict(),
-                        torch_dtype=torch.float16,
-                        device_map="auto",
-                        trust_remote_code=True
-                    )
-                    print("   ✅ device_map分配成功")
-                except Exception as e:
-                    print(f"   ❌ device_map也失败: {e}")
-                    print("   🔄 切换到CPU训练模式...")
-                    self.model = new_model.cpu()
-                    self.device = torch.device("cpu")
-                    print("   ✅ 已切换到CPU训练模式")
+            print("   ❌ 未检测到GPU，无法继续")
+            return False
         
         print(f"模型扩展完成，新参数量: {self.model.num_parameters():,}")
         return True
