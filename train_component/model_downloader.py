@@ -171,8 +171,20 @@ class ModelDownloader:
         print("🔧 使用命令行下载...")
         
         try:
-            # 尝试使用git lfs
-            print("📥 使用git lfs下载...")
+            # 首先检查git lfs是否安装
+            print("🔍 检查git lfs...")
+            result = subprocess.run("git lfs version", shell=True, capture_output=True, text=True)
+            if result.returncode != 0:
+                print("⚠️  git lfs未安装，尝试安装...")
+                try:
+                    subprocess.run("curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash", shell=True)
+                    subprocess.run("sudo apt-get install git-lfs", shell=True)
+                    subprocess.run("git lfs install", shell=True)
+                    print("✅ git lfs安装成功")
+                except Exception as e:
+                    print(f"❌ git lfs安装失败: {e}")
+                    print("🔄 跳过git lfs，直接使用git...")
+            
             # 尝试不同的镜像URL
             mirror_urls = [
                 f"https://huggingface.co/{model_name}",
@@ -181,26 +193,29 @@ class ModelDownloader:
                 f"https://modelscope.cn/models/{model_name}"  # ModelScope镜像
             ]
             
+            # 尝试使用git clone（不使用lfs）
+            print("📥 使用git clone下载...")
             for url in mirror_urls:
                 try:
                     print(f"🔧 尝试镜像: {url}")
-                    cmd = f"git lfs install && git clone {url} {save_dir}"
+                    cmd = f"git clone {url} {save_dir}"
                     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                     
                     if result.returncode == 0:
-                        print("✅ 命令行下载成功")
+                        print("✅ git clone下载成功")
                         return True
                     else:
-                        print(f"❌ 镜像失败: {result.stderr}")
+                        print(f"❌ git clone失败: {result.stderr}")
                 except Exception as e:
-                    print(f"❌ 镜像异常: {e}")
+                    print(f"❌ git clone异常: {e}")
                     continue
             
-            # 如果git lfs失败，尝试使用wget
+            # 如果git失败，尝试使用wget
             print("📥 尝试使用wget下载...")
             for url in mirror_urls:
                 try:
                     print(f"🔧 尝试wget镜像: {url}")
+                    # 使用更简单的wget命令
                     cmd = f"wget -r -np -nH --cut-dirs=2 -R 'index.html*' {url}/tree/main -P {save_dir}"
                     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
                     
@@ -208,12 +223,35 @@ class ModelDownloader:
                         print("✅ wget下载成功")
                         return True
                     else:
-                        print(f"❌ wget镜像失败: {result.stderr}")
+                        print(f"❌ wget失败: {result.stderr}")
                 except Exception as e:
-                    print(f"❌ wget镜像异常: {e}")
+                    print(f"❌ wget异常: {e}")
+                    continue
+            
+            # 最后尝试使用curl
+            print("📥 尝试使用curl下载...")
+            for url in mirror_urls:
+                try:
+                    print(f"🔧 尝试curl镜像: {url}")
+                    cmd = f"curl -L -o {save_dir}/model.zip {url}/archive/main.zip"
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    
+                    if result.returncode == 0:
+                        print("✅ curl下载成功")
+                        # 解压文件
+                        subprocess.run(f"unzip {save_dir}/model.zip -d {save_dir}", shell=True)
+                        return True
+                    else:
+                        print(f"❌ curl失败: {result.stderr}")
+                except Exception as e:
+                    print(f"❌ curl异常: {e}")
                     continue
             
             print("❌ 所有命令行下载方法都失败了")
+            print("💡 建议:")
+            print("   1. 检查网络连接")
+            print("   2. 使用ModelScope下载源")
+            print("   3. 手动下载模型文件")
             return False
             
         except Exception as e:
