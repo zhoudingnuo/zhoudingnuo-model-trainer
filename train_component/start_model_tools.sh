@@ -4,7 +4,7 @@ echo "🤖 模型工具启动器"
 echo "========================"
 echo ""
 echo "请选择要运行的工具:"
-echo "1. 模型下载器 - 从Hugging Face下载模型"
+echo "1. 模型下载器 - 支持Hugging Face和ModelScope"
 echo "2. 模型对话器 - 与本地模型对话"
 echo "3. 模型扩展训练 - 训练模型"
 echo "4. 退出"
@@ -16,6 +16,7 @@ case $choice in
     1)
         echo ""
         echo "🚀 启动模型下载器..."
+        echo "支持从Hugging Face和ModelScope下载模型"
         python3 model_downloader.py
         ;;
     2)
