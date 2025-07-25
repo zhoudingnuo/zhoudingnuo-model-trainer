@@ -155,23 +155,23 @@ class ModelChat:
             output_tokens = 0
             chinese_chars = 0
             
-            print("🤖 助手: ", end="", flush=True)
-            
             with torch.no_grad():
                 # 直接生成完整回复
                 outputs = self.model.generate(
                     input_ids,
                     attention_mask=attention_mask,
-                    max_new_tokens=1024,  # 适中的生成长度
+                    max_new_tokens=512,  # 减少生成长度，避免过长回复
                     temperature=temperature,
                     do_sample=True,
                     top_p=0.9,  # 添加top_p采样
                     top_k=50,   # 添加top_k采样
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    repetition_penalty=1.2,  # 增加重复惩罚
+                    repetition_penalty=1.3,  # 增加重复惩罚
                     use_cache=True,
-                    no_repeat_ngram_size=3  # 避免重复的n-gram
+                    no_repeat_ngram_size=3,  # 避免重复的n-gram
+                    early_stopping=True,     # 早期停止
+                    length_penalty=0.8       # 长度惩罚
                 )
                 
                 # 解码输出
@@ -180,6 +180,10 @@ class ModelChat:
                 # 移除原始提示，只返回生成的部分
                 if generated_text.startswith(prompt):
                     generated_text = generated_text[len(prompt):].strip()
+                
+                # 清理生成的文本，移除可能的重复前缀
+                if generated_text.startswith("🤖 助手: "):
+                    generated_text = generated_text[6:].strip()
                 
                 # 模拟流式输出
                 print("🤖 助手: ", end="", flush=True)
@@ -262,10 +266,10 @@ class ModelChat:
                 # 构建完整提示 - 只包含最近的对话历史
                 if conversation_history:
                     # 限制历史长度，避免上下文过长
-                    recent_history = conversation_history[-6:]  # 只保留最近3轮对话
-                    full_prompt = "\n".join(recent_history) + f"\n用户: {user_input}\n助手:"
+                    recent_history = conversation_history[-4:]  # 只保留最近2轮对话
+                    full_prompt = "\n".join(recent_history) + f"\n用户: {user_input}\n助手: 请直接回答用户的问题，不要自问自答。"
                 else:
-                    full_prompt = f"用户: {user_input}\n助手:"
+                    full_prompt = f"用户: {user_input}\n助手: 请直接回答用户的问题，不要自问自答。"
                 
                 # 流式生成回复
                 response = self.generate_response_stream(full_prompt)
@@ -295,8 +299,8 @@ class ModelChat:
                     conversation_history.append(f"助手: {response}")
                     
                     # 限制对话历史长度，避免过长
-                    if len(conversation_history) > 8:  # 保留最近4轮对话
-                        conversation_history = conversation_history[-8:]
+                    if len(conversation_history) > 4:  # 保留最近2轮对话
+                        conversation_history = conversation_history[-4:]
                 else:
                     print("抱歉，我无法生成回复。")
                     
