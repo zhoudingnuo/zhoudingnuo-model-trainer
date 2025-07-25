@@ -80,7 +80,17 @@ class ModelChat:
             
             # 设置pad_token
             if self.tokenizer.pad_token is None:
-                self.tokenizer.pad_token = self.tokenizer.eos_token
+                if self.tokenizer.eos_token is not None:
+                    self.tokenizer.pad_token = self.tokenizer.eos_token
+                else:
+                    # 如果eos_token也是None，设置一个默认值
+                    self.tokenizer.pad_token = self.tokenizer.eos_token = "[PAD]"
+                    print("⚠️  设置默认pad_token为[PAD]")
+            
+            print(f"✅ tokenizer配置:")
+            print(f"   pad_token: {self.tokenizer.pad_token}")
+            print(f"   eos_token: {self.tokenizer.eos_token}")
+            print(f"   vocab_size: {self.tokenizer.vocab_size}")
             
             print("✅ tokenizer加载完成")
             
@@ -124,21 +134,35 @@ class ModelChat:
             # 记录开始时间
             start_time = time.time()
             
-            # 编码输入
-            inputs = self.tokenizer.encode(prompt, return_tensors="pt")
+            # 编码输入，明确设置attention_mask
+            tokenized = self.tokenizer(
+                prompt, 
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=max_length,
+                return_attention_mask=True
+            )
+            
+            input_ids = tokenized['input_ids']
+            attention_mask = tokenized['attention_mask']
+            
             if self.device == "cuda":
-                inputs = inputs.to(self.device)
+                input_ids = input_ids.to(self.device)
+                attention_mask = attention_mask.to(self.device)
             
             # 生成回复
             with torch.no_grad():
                 outputs = self.model.generate(
-                    inputs,
+                    input_ids,
+                    attention_mask=attention_mask,
                     max_length=max_length,
                     temperature=temperature,
                     do_sample=True,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    repetition_penalty=1.1
+                    repetition_penalty=1.1,
+                    use_cache=True
                 )
             
             # 记录结束时间
@@ -153,7 +177,7 @@ class ModelChat:
                 response = response[len(prompt):].strip()
             
             # 计算统计信息
-            input_tokens = len(inputs[0])
+            input_tokens = len(input_ids[0])
             output_tokens = len(outputs[0]) - input_tokens
             generated_text = response
             
