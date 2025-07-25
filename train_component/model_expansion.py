@@ -1115,6 +1115,54 @@ class ModelExpander:
         else:
             print(f"💾 {stage}CPU模式")
     
+    def _freeze_layers(self, start_layer: int, end_layer: int, freeze: bool = True):
+        """
+        冻结或解冻指定范围的层
+        
+        Args:
+            start_layer: 开始层索引
+            end_layer: 结束层索引
+            freeze: True为冻结，False为解冻
+        """
+        if not hasattr(self.model, 'model') or not hasattr(self.model.model, 'layers'):
+            print("❌ 模型结构不支持层冻结")
+            return
+        
+        layers = self.model.model.layers
+        action = "冻结" if freeze else "解冻"
+        print(f"🔒 {action}第 {start_layer} 到 {end_layer} 层...")
+        
+        frozen_count = 0
+        for i in range(start_layer, min(end_layer, len(layers))):
+            for param in layers[i].parameters():
+                param.requires_grad = not freeze
+            frozen_count += 1
+        
+        print(f"✅ {action}了 {frozen_count} 层")
+    
+    def _get_trainable_parameters_count(self):
+        """获取可训练参数数量"""
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in self.model.parameters())
+        return trainable_params, total_params
+    
+    def _print_layer_status(self):
+        """打印各层的训练状态"""
+        if not hasattr(self.model, 'model') or not hasattr(self.model.model, 'layers'):
+            return
+        
+        layers = self.model.model.layers
+        print("📊 各层训练状态:")
+        
+        for i in range(len(layers)):
+            layer_params = list(layers[i].parameters())
+            trainable = any(p.requires_grad for p in layer_params)
+            status = "🟢 可训练" if trainable else "🔴 已冻结"
+            print(f"   层 {i:2d}: {status}")
+        
+        trainable_params, total_params = self._get_trainable_parameters_count()
+        print(f"📈 可训练参数: {trainable_params:,} / 总参数: {total_params:,} ({trainable_params/total_params*100:.1f}%)")
+    
     def _create_gradient_accumulation_trainer(self, train_dataset, output_dir, epochs, batch_size, gradient_accumulation_steps):
         """
         创建梯度累积训练器
@@ -1393,7 +1441,7 @@ class ModelExpander:
     
     def train_expanded_model(self, output_dir: str, epochs: int = 3, batch_size: int = 4, tokenized_dataset=None):
         """
-        训练扩展后的模型
+        训练扩展后的模型 - 使用分阶段训练策略
         
         Args:
             output_dir: 输出目录
@@ -1416,8 +1464,6 @@ class ModelExpander:
         train_dataset = tokenized_dataset
         print(f"训练集大小: {len(train_dataset)}")
         
-
-        
         # 检查GPU内存
         if torch.cuda.is_available():
             print(f"GPU内存使用情况:")
@@ -1425,101 +1471,173 @@ class ModelExpander:
             print(f"  已缓存: {torch.cuda.memory_reserved(0) / 1024**3:.2f} GB")
             print(f"  总内存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
         
-        # 根据GPU大小智能设置训练参数
-        gradient_accumulation_steps = 8  # 默认值
-        max_length = 512  # 默认值
+        # 执行分阶段训练
+        return self._progressive_training(train_dataset, output_dir, epochs, batch_size)
+    
+    def _progressive_training(self, train_dataset, output_dir: str, epochs: int, batch_size: int):
+        """
+        分阶段渐进式训练策略
         
+        阶段1: 冻结原有层，只训练新增层
+        阶段2: 解冻部分顶层原有层，继续微调
+        阶段3: 解冻全部层进行全量微调
+        """
+        print("🚀 开始分阶段渐进式训练策略")
+        print("=" * 60)
+        
+        # 获取模型层数信息
+        if not hasattr(self.model, 'model') or not hasattr(self.model.model, 'layers'):
+            print("❌ 模型结构不支持分阶段训练")
+            return False
+        
+        total_layers = len(self.model.model.layers)
+        original_layers = self.original_layers_count
+        new_layers = total_layers - original_layers
+        
+        print(f"📊 模型层数信息:")
+        print(f"  总层数: {total_layers}")
+        print(f"  原有层数: {original_layers}")
+        print(f"  新增层数: {new_layers}")
+        
+        # 阶段1: 只训练新增层
+        print("\n🎯 阶段1: 冻结原有层，只训练新增层")
+        print("-" * 40)
+        
+        # 冻结原有层 (0 到 original_layers-1)
+        self._freeze_layers(0, original_layers, freeze=True)
+        # 解冻新增层 (original_layers 到 total_layers-1)
+        self._freeze_layers(original_layers, total_layers, freeze=False)
+        
+        self._print_layer_status()
+        
+        # 训练新增层
+        stage1_output = f"{output_dir}/stage1_new_layers"
+        print(f"\n🔄 开始训练新增层...")
+        print(f"📁 输出目录: {stage1_output}")
+        
+        # 使用较小的学习率训练新增层
+        stage1_epochs = max(1, epochs // 3)  # 阶段1使用1/3的epochs
+        success = self._train_stage(train_dataset, stage1_output, stage1_epochs, batch_size, 
+                                  learning_rate=1e-4, stage_name="新增层训练")
+        
+        if not success:
+            print("❌ 阶段1训练失败")
+            return False
+        
+        # 阶段2: 解冻部分顶层原有层
+        print("\n🎯 阶段2: 解冻部分顶层原有层，继续微调")
+        print("-" * 40)
+        
+        # 解冻最后1/3的原有层
+        unfreeze_start = max(0, original_layers - original_layers // 3)
+        self._freeze_layers(unfreeze_start, original_layers, freeze=False)
+        
+        self._print_layer_status()
+        
+        # 训练部分原有层 + 新增层
+        stage2_output = f"{output_dir}/stage2_partial_unfreeze"
+        print(f"\n🔄 开始训练部分原有层 + 新增层...")
+        print(f"📁 输出目录: {stage2_output}")
+        
+        stage2_epochs = max(1, epochs // 3)  # 阶段2使用1/3的epochs
+        success = self._train_stage(train_dataset, stage2_output, stage2_epochs, batch_size,
+                                  learning_rate=5e-5, stage_name="部分层微调")
+        
+        if not success:
+            print("❌ 阶段2训练失败")
+            return False
+        
+        # 阶段3: 全量微调
+        print("\n🎯 阶段3: 解冻全部层进行全量微调")
+        print("-" * 40)
+        
+        # 解冻所有层
+        self._freeze_layers(0, total_layers, freeze=False)
+        
+        self._print_layer_status()
+        
+        # 全量微调
+        stage3_output = f"{output_dir}/stage3_full_finetune"
+        print(f"\n🔄 开始全量微调...")
+        print(f"📁 输出目录: {stage3_output}")
+        
+        stage3_epochs = max(1, epochs - stage1_epochs - stage2_epochs)  # 剩余epochs
+        success = self._train_stage(train_dataset, stage3_output, stage3_epochs, batch_size,
+                                  learning_rate=2e-5, stage_name="全量微调")
+        
+        if not success:
+            print("❌ 阶段3训练失败")
+            return False
+        
+        print("\n✅ 分阶段训练完成!")
+        print(f"📁 最终模型保存在: {stage3_output}")
+        
+        # 加载最终模型
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(stage3_output, trust_remote_code=True)
+            print("✅ 最终模型加载成功")
+        except Exception as e:
+            print(f"❌ 最终模型加载失败: {e}")
+            return False
+        
+        return True
+    
+    def _train_stage(self, train_dataset, output_dir: str, epochs: int, batch_size: int, 
+                    learning_rate: float, stage_name: str):
+        """
+        训练单个阶段
+        
+        Args:
+            train_dataset: 训练数据集
+            output_dir: 输出目录
+            epochs: 训练轮数
+            batch_size: 批次大小
+            learning_rate: 学习率
+            stage_name: 阶段名称
+        """
+        print(f"🎯 {stage_name} - 训练参数:")
+        print(f"  Epochs: {epochs}")
+        print(f"  Batch Size: {batch_size}")
+        print(f"  Learning Rate: {learning_rate}")
+        
+        # 根据GPU大小设置梯度累积步数
         if torch.cuda.is_available():
             total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-            
-            if total_memory >= 100:  # 140GB怪兽级GPU
-                print("🎯 怪兽级GPU配置 - 火力全开!")
-                batch_size = 32  # 大批次
-                gradient_accumulation_steps = 4  # 少累积，多并行
-                max_length = 2048  # 长序列
-                print(f"🔥 批次大小: {batch_size}")
-                print(f"🔥 梯度累积步数: {gradient_accumulation_steps}")
-                print(f"🔥 等效大批次: {batch_size * gradient_accumulation_steps}")
-                print(f"🔥 序列长度: {max_length}")
-            elif total_memory >= 50:  # 50GB+高性能GPU
-                print("⚡ 高性能GPU配置")
-                batch_size = 16
+            if total_memory >= 100:  # 140GB GPU
+                gradient_accumulation_steps = 4
+            elif total_memory >= 50:  # 50GB+ GPU
                 gradient_accumulation_steps = 8
-                max_length = 1024
-                print(f"⚡ 批次大小: {batch_size}")
-                print(f"⚡ 梯度累积步数: {gradient_accumulation_steps}")
-                print(f"⚡ 等效大批次: {batch_size * gradient_accumulation_steps}")
-                print(f"⚡ 序列长度: {max_length}")
             else:
-                print("🚀 标准高性能配置")
-                batch_size = 8
-                gradient_accumulation_steps = 8
-                max_length = 512
-                print(f"🚀 批次大小: {batch_size}")
-                print(f"🚀 梯度累积步数: {gradient_accumulation_steps}")
-                print(f"🚀 等效大批次: {batch_size * gradient_accumulation_steps}")
-                print(f"🚀 序列长度: {max_length}")
+                gradient_accumulation_steps = 16
         else:
-            print("使用标准训练设置")
-            batch_size = 2
-            gradient_accumulation_steps = 8
-            max_length = 512
+            gradient_accumulation_steps = 32
         
-        # 检查模型大小
-        model_params = self.model.num_parameters()
-        print(f"模型参数量: {model_params:,}")
-        print(f"原始层数: {self.original_layers_count}")
-        
-        print(f"原始层数: {self.original_layers_count}")
-        
-
-        
-        # 使用梯度累积训练器
-        print("创建梯度累积训练器...")
-        
-        trainer = self._create_gradient_accumulation_trainer(
-            train_dataset, output_dir, epochs, batch_size, gradient_accumulation_steps
-        )
-        print("梯度累积训练器创建完成")
-        
-
-        
-        # 开始训练
-        print("开始训练扩展后的模型...")
-        print(f"训练参数:")
-        print(f"  - 批次大小: {batch_size}")
-        print(f"  - 训练轮数: {epochs}")
-        print(f"  - 学习率: {trainer.args.learning_rate}")
-        print(f"  - 梯度累积步数: {trainer.args.gradient_accumulation_steps}")
-        print(f"  - 等效大批次: {batch_size * gradient_accumulation_steps}")
-        print(f"  - 使用设备: {self.device}")
-        print(f"  - 训练数据量: {len(train_dataset)}")
-        
-        print("="*50)
-        print("开始训练...")
-        print("="*50)
+        print(f"  Gradient Accumulation Steps: {gradient_accumulation_steps}")
         
         try:
-            trainer.train()
-            print("训练完成！")
+            # 创建训练器
+            trainer = self._create_gradient_accumulation_trainer(
+                train_dataset, output_dir, epochs, batch_size, gradient_accumulation_steps
+            )
             
-
-        except torch.cuda.OutOfMemoryError as e:
-            print(f"GPU内存不足: {e}")
-            print("训练失败，请检查GPU内存或减少模型大小")
-            return False
+            # 设置自定义学习率
+            trainer.learning_rate = learning_rate
+            
+            # 开始训练
+            print(f"🚀 开始{stage_name}...")
+            trainer.train()
+            
+            # 保存模型
+            trainer.save_model()
+            print(f"✅ {stage_name}完成，模型已保存到: {output_dir}")
+            
+            return True
+            
         except Exception as e:
-            print(f"训练过程中出错: {e}")
+            print(f"❌ {stage_name}失败: {e}")
             import traceback
             traceback.print_exc()
             return False
-        
-        # 保存模型
-        trainer.save_model()
-        self.tokenizer.save_pretrained(output_dir)
-        
-        print(f"扩展训练完成，模型已保存到: {output_dir}")
-        return True
     
     def run_expansion_pipeline(self):
         """
