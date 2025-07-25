@@ -716,7 +716,6 @@ class ModelExpander:
                 new_model = AutoModelForCausalLM.from_config(
                     new_model_config,
                     torch_dtype=torch.float16,  # 使用float16节省内存
-                    low_cpu_mem_usage=True,     # 低CPU内存使用
                 )
                 print("   ✅ GPU模型创建成功")
                 
