@@ -611,22 +611,46 @@ class ModelExpander:
         
         # 创建新模型（使用CPU初始化以节省GPU内存）
         print("创建扩展后的模型...")
+        print(f"   📊 新模型配置:")
+        print(f"     隐藏层大小: {new_config['hidden_size']}")
+        print(f"     层数: {new_config['num_hidden_layers']} (原: {self.original_layers_count})")
+        print(f"     注意力头数: {new_config['num_attention_heads']}")
+        print(f"     新增层数: {new_config['num_hidden_layers'] - self.original_layers_count}")
+        
+        # 清理GPU内存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print(f"   🧹 清理GPU内存，当前使用: {torch.cuda.memory_allocated(0) / 1024**3:.2f}GB")
+        
+        print("   🔄 正在创建新模型配置...")
         new_model = AutoModelForCausalLM.from_config(new_model_config)
+        print("   ✅ 新模型配置创建完成")
+        
         # 先在CPU上初始化，避免GPU内存不足
+        print("   🔄 将模型移动到CPU...")
         new_model = new_model.cpu()
+        print("   ✅ 模型已移动到CPU")
         
         # 复制原模型权重到新模型
         print("复制原模型权重...")
+        print(f"   📋 开始权重复制...")
+        print(f"   📊 原模型参数量: {original_model.num_parameters():,}")
+        print(f"   📊 新模型参数量: {new_model.num_parameters():,}")
+        
         self._copy_weights_preserving_knowledge(original_model, new_model)
+        print("   ✅ 权重复制完成")
         
         # 替换模型并移动到GPU（使用device_map自动管理内存）
         print("将模型移动到GPU...")
         try:
+            print("   🔄 尝试直接移动到GPU...")
             # 尝试使用device_map自动管理GPU内存
             self.model = new_model.to(self.device)
+            print("   ✅ 模型已成功移动到GPU")
         except torch.cuda.OutOfMemoryError:
-            print("GPU内存不足，尝试使用device_map...")
+            print("   ⚠️  GPU内存不足，尝试使用device_map...")
             try:
+                print("   🔄 使用device_map自动分配内存...")
                 # 使用device_map自动分配内存
                 self.model = AutoModelForCausalLM.from_pretrained(
                     None, 
@@ -636,11 +660,13 @@ class ModelExpander:
                     device_map="auto",
                     trust_remote_code=True
                 )
+                print("   ✅ device_map分配成功")
             except Exception as e:
-                print(f"device_map也失败，使用CPU训练: {e}")
+                print(f"   ❌ device_map也失败: {e}")
+                print("   🔄 切换到CPU训练模式...")
                 self.model = new_model.cpu()
                 self.device = torch.device("cpu")
-                print("切换到CPU训练模式")
+                print("   ✅ 已切换到CPU训练模式")
         
         print(f"模型扩展完成，新参数量: {self.model.num_parameters():,}")
         return True
