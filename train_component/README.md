@@ -33,21 +33,27 @@ train_component/
 - 支持多种蒸馏策略
 - 可配置蒸馏参数
 
-### 3. 数据处理工具
-- **数据修复** (`fix_data.py`): 修复训练数据格式问题
-- **训练检查** (`check_training.py`): 检查训练环境和数据
+### 3. 模型管理工具
+- **模型下载器** (`model_downloader.py`): 从Hugging Face下载用户选择的模型
+- **模型对话器** (`model_chat.py`): 选择本地模型进行对话交互
 - **模型信息** (`model_info.py`): 查看模型详细信息
 
-### 4. 启动脚本
+### 4. 数据处理工具
+- **数据修复** (`fix_data.py`): 修复训练数据格式问题
+- **训练检查** (`check_training.py`): 检查训练环境和数据
+
+### 5. 启动脚本
+- **模型工具启动器** (`start_model_tools.bat/.sh`): 统一启动所有模型工具
 - **正常模式** (`start_model_expansion.bat`): 启动模型扩展训练
 - **调试模式** (`debug_model_expansion.bat`): 使用预设参数进行调试训练
 
 ## 使用方法
 
 ### 快速开始
-1. 确保训练数据在 `data/` 目录中
-2. 运行 `start_model_expansion.bat` 开始训练
-3. 或运行 `debug_model_expansion.bat` 进行调试
+1. **模型下载**: 运行 `start_model_tools.bat` 或 `./start_model_tools.sh`，选择"模型下载器"
+2. **模型对话**: 运行启动器，选择"模型对话器"与下载的模型对话
+3. **模型训练**: 运行启动器，选择"模型扩展训练"开始训练
+4. **数据准备**: 确保训练数据在 `data/` 目录中
 
 ### 数据准备
 - 训练数据应为 JSONL 格式
