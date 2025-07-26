@@ -689,25 +689,7 @@ class ModelExpander:
         print("   ⏳ 这可能需要几分钟时间，请耐心等待...")
         print("   💡 如果觉得太慢，可以按 Ctrl+C 中断，然后选择快速模式")
         
-        # 检查用户是否想要快速模式
-        try:
-            import select
-            import sys
-            
-            # 非阻塞检查用户输入
-            if select.select([sys.stdin], [], [], 0.1)[0]:
-                user_input = input().strip().lower()
-                if user_input in ['q', 'quit', 'exit', 'fast', '快速']:
-                    print("   🚀 用户选择快速模式，跳过权重复制...")
-                    # 直接创建新模型，不复制权重
-                    with torch.device('cpu'):
-                        new_model = AutoModelForCausalLM.from_config(new_model_config)
-                    print("   ✅ 快速模式完成")
-                    return True
-        except:
-            pass  # 如果没有输入，继续正常流程
-        
-        # 140GB GPU专用优化策略
+        # 140GB GPU专用优化策略 - 添加超时机制
         if torch.cuda.is_available():
             total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
             allocated = torch.cuda.memory_allocated(0) / 1024**3
@@ -715,41 +697,84 @@ class ModelExpander:
             
             print(f"   💾 GPU内存状态: 已用 {allocated:.2f}GB / 总计 {total_memory:.1f}GB (可用 {free_memory:.2f}GB)")
             
-            # 140GB GPU，直接使用GPU，不降级到CPU
+            # 140GB GPU，使用超时机制
             print("   🚀 140GB GPU火力全开，使用GPU创建模型...")
             print("   ⏳ 模型创建可能需要一些时间，请耐心等待...")
+            print("   ⏰ 设置60秒超时，如果超时将自动切换到快速模式")
             
-            # 使用更激进的GPU优化
-            try:
-                # 设置CUDA优化
-                torch.backends.cudnn.benchmark = True
-                torch.backends.cudnn.deterministic = False
-                
-                print("   🔧 启用CUDA优化...")
-                
-                # 直接创建，不使用线程（避免线程开销）
-                print("   🔄 开始创建模型...")
-                new_model = AutoModelForCausalLM.from_config(
-                    new_model_config,
-                    torch_dtype=torch.float16,  # 使用float16节省内存
-                )
-                print("   ✅ GPU模型创建成功")
-                
-            except Exception as e:
-                print(f"   ❌ GPU创建失败: {e}")
-                print("   🔄 尝试使用更保守的设置...")
-                
-                # 如果失败，尝试更保守的设置
+            # 使用超时机制创建模型
+            import signal
+            import threading
+            import time
+            
+            model_created = False
+            new_model = None
+            creation_error = None
+            
+            def create_model_with_timeout():
+                nonlocal model_created, new_model, creation_error
                 try:
+                    # 设置CUDA优化
+                    torch.backends.cudnn.benchmark = True
+                    torch.backends.cudnn.deterministic = False
+                    
+                    print("   🔧 启用CUDA优化...")
+                    print("   🔄 开始创建模型...")
+                    
+                    # 使用更快的创建方式
                     new_model = AutoModelForCausalLM.from_config(
                         new_model_config,
-                        torch_dtype=torch.float32,  # 使用float32
+                        torch_dtype=torch.float16,  # 使用float16节省内存
                     )
-                    print("   ✅ GPU模型创建成功（保守模式）")
-                except Exception as e2:
-                    print(f"   ❌ 保守模式也失败: {e2}")
-                    print("   💡 建议检查模型配置或重启程序")
+                    model_created = True
+                    print("   ✅ GPU模型创建成功")
+                    
+                except Exception as e:
+                    creation_error = e
+                    print(f"   ❌ GPU创建失败: {e}")
+            
+            # 启动模型创建线程
+            creation_thread = threading.Thread(target=create_model_with_timeout)
+            creation_thread.daemon = True
+            creation_thread.start()
+            
+            # 等待模型创建，最多60秒
+            start_time = time.time()
+            timeout = 60  # 60秒超时
+            
+            while not model_created and time.time() - start_time < timeout:
+                time.sleep(1)
+                elapsed = int(time.time() - start_time)
+                if elapsed % 10 == 0:  # 每10秒显示一次进度
+                    print(f"   ⏳ 模型创建中... ({elapsed}s)")
+            
+            if not model_created:
+                print(f"   ⏰ 模型创建超时 ({timeout}s)，切换到快速模式...")
+                print("   🚀 使用快速模式创建模型（随机初始化新层）...")
+                
+                # 快速模式：在CPU上创建，然后移动到GPU
+                try:
+                    with torch.device('cpu'):
+                        new_model = AutoModelForCausalLM.from_config(new_model_config)
+                    print("   ✅ 快速模式模型创建成功")
+                    
+                    # 移动到GPU
+                    if torch.cuda.is_available():
+                        print("   🔄 将模型移动到GPU...")
+                        new_model = new_model.to(self.device)
+                        print("   ✅ 模型已移动到GPU")
+                    
+                    # 跳过权重复制，直接返回
+                    print("   ⏭️  快速模式：跳过权重复制，新层将使用随机初始化")
+                    self.model = new_model
+                    print(f"模型扩展完成，新参数量: {self.model.num_parameters():,}")
+                    return True
+                    
+                except Exception as e:
+                    print(f"   ❌ 快速模式也失败: {e}")
                     return False
+            else:
+                print("   ✅ 模型创建成功")
                     
         else:
             print("   ❌ 未检测到GPU，无法使用GPU创建模型")
@@ -771,30 +796,49 @@ class ModelExpander:
             print("   ❌ 未检测到GPU，无法继续")
             return False
         
-        # 复制原模型权重到新模型
+        # 复制原模型权重到新模型 - 添加超时机制
         print("复制原模型权重...")
         print(f"   📋 开始权重复制...")
         print(f"   📊 原模型参数量: {original_model.num_parameters():,}")
         print(f"   📊 新模型参数量: {new_model.num_parameters():,}")
         print(f"   📈 参数增长: {new_model.num_parameters() - original_model.num_parameters():,}")
-        print("   ⏳ 权重复制可能需要几分钟，请耐心等待...")
-        print("   💡 如果觉得太慢，可以按 Ctrl+C 中断，然后选择快速模式")
+        print(f"   ⏰ 设置120秒超时，如果超时将自动切换到快速模式")
         
-        try:
-            self._copy_weights_preserving_knowledge(original_model, new_model)
-            print("   ✅ 权重复制完成")
-        except KeyboardInterrupt:
-            print("\n   ⏹️  用户中断权重复制")
-            print("   🔄 切换到快速模式（使用默认初始化）...")
-            # 用户中断，使用默认初始化
-            new_model = AutoModelForCausalLM.from_config(new_model_config)
-            print("   ✅ 快速模式完成（新层将使用随机初始化）")
-        except Exception as e:
-            print(f"   ❌ 权重复制失败: {e}")
-            print("   💡 尝试使用默认初始化...")
-            # 如果权重复制失败，使用默认初始化
-            new_model = AutoModelForCausalLM.from_config(new_model_config)
-            print("   ✅ 使用默认初始化完成")
+        # 使用超时机制进行权重复制
+        weights_copied = False
+        copy_error = None
+        
+        def copy_weights_with_timeout():
+            nonlocal weights_copied, copy_error
+            try:
+                self._copy_weights_preserving_knowledge(original_model, new_model)
+                weights_copied = True
+                print("   ✅ 权重复制完成")
+            except Exception as e:
+                copy_error = e
+                print(f"   ❌ 权重复制失败: {e}")
+        
+        # 启动权重复制线程
+        copy_thread = threading.Thread(target=copy_weights_with_timeout)
+        copy_thread.daemon = True
+        copy_thread.start()
+        
+        # 等待权重复制，最多120秒
+        start_time = time.time()
+        timeout = 120  # 120秒超时
+        
+        while not weights_copied and time.time() - start_time < timeout:
+            time.sleep(1)
+            elapsed = int(time.time() - start_time)
+            if elapsed % 15 == 0:  # 每15秒显示一次进度
+                print(f"   ⏳ 权重复制中... ({elapsed}s)")
+        
+        if not weights_copied:
+            print(f"   ⏰ 权重复制超时 ({timeout}s)，切换到快速模式...")
+            print("   🚀 使用快速模式（新层将使用随机初始化）...")
+            # 跳过权重复制，直接使用新模型
+        else:
+            print("   ✅ 权重复制成功完成")
         
         # 设置最终模型位置 - 140GB GPU专用
         print("设置最终模型位置...")
