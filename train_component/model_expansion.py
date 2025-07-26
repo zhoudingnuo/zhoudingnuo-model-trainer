@@ -218,7 +218,7 @@ class ModelExpander:
                         self.show_model_details(model_path)
                         
                         models.append(str(model_path))
-                except Exception as e:
+                    except Exception as e:
                         print(f"   ❌ 读取model_info.json失败: {e}")
                         print(f"{i}. 📁 {model_path.name} (信息文件损坏)")
                         models.append(str(model_path))
@@ -388,7 +388,7 @@ class ModelExpander:
         if os.path.isabs(model_name) or model_name.startswith('model/'):
             model_path = model_name
         else:
-        model_path = os.path.join(self.model_dir, model_name)
+            model_path = os.path.join(self.model_dir, model_name)
         
         try:
             print(f"正在加载模型: {model_path}")
@@ -750,7 +750,7 @@ class ModelExpander:
                     model_created = True
                     print("   ✅ GPU模型创建成功")
                     
-            except Exception as e:
+                except Exception as e:
                     creation_error = e
                     print(f"   ❌ GPU创建失败: {e}")
             
@@ -1795,10 +1795,10 @@ class ModelExpander:
         
         # 保存模型
         trainer.save_model()
-            print(f"✅ {stage_name}完成，模型已保存到: {output_dir}")
+        print(f"✅ {stage_name}完成，模型已保存到: {output_dir}")
         
         return True
-            
+        
         except Exception as e:
             print(f"❌ {stage_name}失败: {e}")
             import traceback
