@@ -631,24 +631,18 @@ class ModelExpander:
             total = torch.cuda.get_device_properties(0).total_memory / 1024**3
             print(f"   🧹 GPU内存清理完成，当前使用: {allocated:.2f}GB / 总计 {total:.1f}GB")
             
-            # 如果内存使用率仍然很高，尝试释放更多内存
+            # 如果内存使用率仍然很高，尝试释放更多缓存
             if allocated / total > 0.1:  # 降低阈值，更积极地清理
                 print("   ⚠️  GPU内存使用率较高，尝试更激进的清理...")
                 
-                # 删除原模型以释放内存
-                if 'original_model' in locals():
-                    print("   🗑️  删除原模型释放内存...")
-                    del original_model
-                    torch.cuda.empty_cache()
-                    gc.collect()
-                
-                # 尝试释放更多缓存
+                # 只清理缓存，不删除原模型
+                print("   🧹 清理GPU缓存...")
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
                 gc.collect()
                 
                 allocated = torch.cuda.memory_allocated(0) / 1024**3
-                print(f"   🧹 激进清理完成，当前使用: {allocated:.2f}GB")
+                print(f"   🧹 缓存清理完成，当前使用: {allocated:.2f}GB")
                 
                 # 如果还是很高，强制重置
                 if allocated / total > 0.15:
