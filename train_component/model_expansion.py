@@ -140,8 +140,19 @@ class ModelExpander:
         """
         self.model_dir = model_dir
         self.data_dir = data_dir
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"使用设备: {self.device}")
+        # 强制检查GPU可用性
+        if not torch.cuda.is_available():
+            print("❌ CUDA不可用，无法使用GPU训练！")
+            print("请检查：")
+            print("1. 是否安装了CUDA版本的PyTorch")
+            print("2. 是否有可用的GPU")
+            print("3. CUDA驱动是否正确安装")
+            raise RuntimeError("CUDA不可用，无法进行GPU训练")
+        
+        self.device = torch.device("cuda")
+        print(f"✅ 使用设备: {self.device}")
+        print(f"🎮 GPU设备: {torch.cuda.get_device_name(0)}")
+        print(f"💾 GPU内存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
         print(f"模型目录: {os.path.abspath(self.model_dir)}")
         print(f"数据目录: {os.path.abspath(self.data_dir)}")
         
@@ -158,7 +169,7 @@ class ModelExpander:
         if not os.path.exists(self.model_dir):
             print("❌ 模型目录不存在")
             return []
-        
+            
         print(f"🔍 扫描目录: {self.model_dir}")
         print(f"🔍 绝对路径: {os.path.abspath(self.model_dir)}")
         
@@ -179,7 +190,7 @@ class ModelExpander:
                 if model_path.name in ['trained', 'output', 'checkpoints', 'logs']:
                     print(f"   ⏭️  跳过训练目录: {model_path.name}")
                     continue
-                
+                    
                 # 列出目录内容
                 try:
                     dir_contents = list(model_path.iterdir())
@@ -207,7 +218,7 @@ class ModelExpander:
                         self.show_model_details(model_path)
                         
                         models.append(str(model_path))
-                    except Exception as e:
+                except Exception as e:
                         print(f"   ❌ 读取model_info.json失败: {e}")
                         print(f"{i}. 📁 {model_path.name} (信息文件损坏)")
                         models.append(str(model_path))
@@ -233,7 +244,7 @@ class ModelExpander:
                     else:
                         print(f"   ❌ 未找到config.json")
                         print(f"{i}. ⏭️  跳过非模型目录: {model_path.name}")
-                        continue
+                    continue
         
         if not models:
             print("\n❌ 未找到任何模型")
@@ -243,7 +254,7 @@ class ModelExpander:
             print("3. 可以使用 model_chat.py 来测试模型是否可用")
         else:
             print(f"\n✅ 找到 {len(models)} 个模型")
-            
+                    
         return models
     
     def show_model_details(self, model_path: Path):
@@ -377,7 +388,7 @@ class ModelExpander:
         if os.path.isabs(model_name) or model_name.startswith('model/'):
             model_path = model_name
         else:
-            model_path = os.path.join(self.model_dir, model_name)
+        model_path = os.path.join(self.model_dir, model_name)
         
         try:
             print(f"正在加载模型: {model_path}")
@@ -397,33 +408,43 @@ class ModelExpander:
             
             self.tokenizer = AutoTokenizer.from_pretrained(actual_model_path)
             
-            # 使用更节省内存的加载方式
-            try:
-                # 首先尝试使用device_map自动管理内存
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    actual_model_path,
-                    torch_dtype=torch.float16,
-                    device_map="auto",
-                    trust_remote_code=True,
-                    low_cpu_mem_usage=True
-                )
-            except torch.cuda.OutOfMemoryError:
-                print("GPU内存不足，尝试使用CPU加载...")
-                # 如果GPU内存不足，使用CPU加载
-                self.model = AutoModelForCausalLM.from_pretrained(
-                    actual_model_path,
-                    torch_dtype=torch.float16,
-                    device_map="cpu",
-                    trust_remote_code=True,
-                    low_cpu_mem_usage=True
-                )
-                # 然后尝试移动到GPU
-                try:
-                    self.model = self.model.to(self.device)
-                except torch.cuda.OutOfMemoryError:
-                    print("GPU内存仍然不足，使用CPU训练")
-                    self.device = torch.device("cpu")
-                    self.model = self.model.cpu()
+            # 强制使用GPU加载模型
+            print("🚀 强制使用GPU加载模型...")
+            
+            # 清理GPU内存
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                import gc
+                gc.collect()
+                
+                allocated = torch.cuda.memory_allocated(0) / 1024**3
+                total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                print(f"💾 GPU内存状态: 已用 {allocated:.2f}GB / 总计 {total:.1f}GB")
+            
+            # 强制使用GPU加载，不使用device_map="auto"
+            self.model = AutoModelForCausalLM.from_pretrained(
+                actual_model_path,
+                torch_dtype=torch.float16,
+                trust_remote_code=True,
+                low_cpu_mem_usage=True
+            )
+            
+            # 强制移动到GPU
+            print("🔄 将模型移动到GPU...")
+            self.model = self.model.to(self.device)
+            
+            # 验证模型确实在GPU上
+            if self.model.device.type != 'cuda':
+                raise RuntimeError(f"模型未能成功移动到GPU，当前设备: {self.model.device}")
+            
+            print(f"✅ 模型已成功加载到GPU: {self.model.device}")
+            
+            # 显示GPU内存使用情况
+            if torch.cuda.is_available():
+                allocated = torch.cuda.memory_allocated(0) / 1024**3
+                total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                print(f"GPU内存使用: {allocated:.2f}GB / {total:.1f}GB ({allocated/total*100:.1f}%)")
             
             # 设置pad_token
             if self.tokenizer.pad_token is None:
@@ -729,7 +750,7 @@ class ModelExpander:
                     model_created = True
                     print("   ✅ GPU模型创建成功")
                     
-                except Exception as e:
+            except Exception as e:
                     creation_error = e
                     print(f"   ❌ GPU创建失败: {e}")
             
@@ -928,8 +949,8 @@ class ModelExpander:
                                 print(f"🔄 调整参数维度: {key} {orig_param.shape} -> {new_param.shape}")
                             else:
                                 print(f"⚠️  跳过维度不匹配的参数: {key} {orig_param.shape} -> {new_param.shape}")
-                                skipped_params += 1
-            
+                            skipped_params += 1
+        
             if layer_copied > 0:
                 print(f"  ✅ 层 {i}: 复制了 {layer_copied} 个参数")
         
@@ -1435,6 +1456,27 @@ class ModelExpander:
             data_collator=data_collator,
         )
         
+        # 强制确保模型在GPU上
+        if hasattr(trainer.model, 'device'):
+            if trainer.model.device.type != 'cuda':
+                print("⚠️  检测到模型不在GPU上，强制移动到GPU...")
+                trainer.model = trainer.model.to(self.device)
+                print(f"✅ 模型已移动到GPU: {trainer.model.device}")
+        else:
+            print("⚠️  无法检测模型设备，手动移动到GPU...")
+            trainer.model = trainer.model.to(self.device)
+            print(f"✅ 模型已移动到GPU: {trainer.model.device}")
+        
+        # 验证GPU使用
+        print("🔍 验证GPU使用情况:")
+        print(f"  模型设备: {trainer.model.device}")
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated(0) / 1024**3
+            total = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"  GPU内存使用: {allocated:.2f}GB / {total:.1f}GB ({allocated/total*100:.1f}%)")
+        
+        return trainer
+        
         return trainer
     
 
@@ -1750,12 +1792,12 @@ class ModelExpander:
             # 开始训练
             print(f"🚀 开始{stage_name}...")
             trainer.train()
-            
-            # 保存模型
-            trainer.save_model()
+        
+        # 保存模型
+        trainer.save_model()
             print(f"✅ {stage_name}完成，模型已保存到: {output_dir}")
-            
-            return True
+        
+        return True
             
         except Exception as e:
             print(f"❌ {stage_name}失败: {e}")
