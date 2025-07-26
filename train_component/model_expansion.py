@@ -1792,13 +1792,13 @@ class ModelExpander:
             # 开始训练
             print(f"🚀 开始{stage_name}...")
             trainer.train()
-        
-        # 保存模型
-        trainer.save_model()
-        print(f"✅ {stage_name}完成，模型已保存到: {output_dir}")
-        
-        return True
-        
+            
+            # 保存模型
+            trainer.save_model()
+            print(f"✅ {stage_name}完成，模型已保存到: {output_dir}")
+            
+            return True
+            
         except Exception as e:
             print(f"❌ {stage_name}失败: {e}")
             import traceback
