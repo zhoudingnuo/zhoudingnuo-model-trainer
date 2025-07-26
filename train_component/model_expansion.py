@@ -217,10 +217,19 @@ class ModelExpander:
                     config_file = model_path / "config.json"
                     if config_file.exists():
                         print(f"   ✅ 找到config.json，认为是模型")
-                        print(f"{i}. 📁 {model_path.name} (无信息文件)")
-                        # 尝试显示模型详细信息
-                        self.show_model_details(model_path)
-                        models.append(str(model_path))
+                        
+                        # 检查是否有权重文件
+                        weight_files = list(model_path.glob("*.safetensors")) + list(model_path.glob("*.bin"))
+                        if weight_files:
+                            print(f"   ✅ 找到 {len(weight_files)} 个权重文件")
+                            print(f"{i}. 📁 {model_path.name} (无信息文件)")
+                            # 尝试显示模型详细信息
+                            self.show_model_details(model_path)
+                            models.append(str(model_path))
+                        else:
+                            print(f"   ❌ 未找到权重文件")
+                            print(f"{i}. ⏭️  跳过不完整模型: {model_path.name}")
+                            continue
                     else:
                         print(f"   ❌ 未找到config.json")
                         print(f"{i}. ⏭️  跳过非模型目录: {model_path.name}")
@@ -265,14 +274,25 @@ class ModelExpander:
             except Exception as e:
                 print(f"   ⚠️  无法加载tokenizer: {str(e)[:50]}...")
             
-            # 计算参数量
+            # 计算参数量 - 使用更安全的方式
             try:
                 print(f"   🧠 正在计算参数量...")
+                
+                # 检查是否有权重文件
+                weight_files = list(model_path.glob("*.safetensors")) + list(model_path.glob("*.bin"))
+                if not weight_files:
+                    print(f"   ⚠️  未找到权重文件，无法计算参数量")
+                    return
+                
+                print(f"   📁 找到 {len(weight_files)} 个权重文件")
+                
+                # 使用更轻量的方式计算参数量
                 model = AutoModelForCausalLM.from_pretrained(
                     str(model_path),
                     torch_dtype=torch.float16,
                     device_map='auto' if torch.cuda.is_available() else None,
-                    trust_remote_code=True
+                    trust_remote_code=True,
+                    low_cpu_mem_usage=True  # 减少内存使用
                 )
                 
                 total_params = sum(p.numel() for p in model.parameters())
@@ -289,10 +309,12 @@ class ModelExpander:
                     torch.cuda.empty_cache()
                     
             except Exception as e:
-                print(f"   ⚠️  无法计算参数量: {str(e)[:50]}...")
+                print(f"   ⚠️  无法计算参数量: {str(e)[:100]}...")
+                # 即使无法加载模型，也继续处理，因为配置已经成功加载
             
         except Exception as e:
-            print(f"   ❌ 无法分析模型信息: {str(e)[:50]}...")
+            print(f"   ❌ 无法分析模型信息: {str(e)[:100]}...")
+            # 即使配置加载失败，也不要阻止模型被识别
         
         print()  # 添加空行分隔
     
