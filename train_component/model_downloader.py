@@ -656,6 +656,121 @@ class ModelDownloader:
         
         model_name = models[index - 1]
         return self.delete_model(model_name)
+    
+    def clean_invalid_models(self):
+        """一键清理无效模型"""
+        print("🧹 开始扫描无效模型...")
+        print("=" * 50)
+        
+        if not self.model_dir.exists():
+            print("❌ 模型目录不存在")
+            return
+        
+        invalid_models = []
+        valid_models = []
+        total_size_freed = 0
+        
+        for model_path in self.model_dir.iterdir():
+            if not model_path.is_dir():
+                continue
+                
+            print(f"🔍 检查模型: {model_path.name}")
+            
+            # 检查是否为训练输出目录
+            if model_path.name in ['trained', 'output', 'checkpoints', 'logs', 'temp', 'tmp']:
+                print(f"   ⏭️  跳过训练目录: {model_path.name}")
+                continue
+            
+            # 检查是否有必要的模型文件
+            config_file = model_path / "config.json"
+            tokenizer_file = model_path / "tokenizer.json"
+            model_info_file = model_path / "model_info.json"
+            
+            is_valid = True
+            issues = []
+            
+            # 检查配置文件
+            if not config_file.exists():
+                is_valid = False
+                issues.append("缺少config.json")
+            
+            # 检查tokenizer文件
+            if not tokenizer_file.exists():
+                issues.append("缺少tokenizer.json")
+            
+            # 检查模型信息文件
+            if not model_info_file.exists():
+                issues.append("缺少model_info.json")
+            
+            # 检查是否有模型权重文件
+            weight_files = list(model_path.glob("*.safetensors")) + list(model_path.glob("*.bin"))
+            if not weight_files:
+                is_valid = False
+                issues.append("缺少模型权重文件")
+            
+            # 检查目录是否为空或只有隐藏文件
+            visible_files = [f for f in model_path.iterdir() if not f.name.startswith('.')]
+            if not visible_files:
+                is_valid = False
+                issues.append("目录为空")
+            
+            if is_valid:
+                valid_models.append(model_path)
+                print(f"   ✅ 有效模型")
+            else:
+                invalid_models.append((model_path, issues))
+                print(f"   ❌ 无效模型: {', '.join(issues)}")
+        
+        print("\n📊 扫描结果:")
+        print(f"   有效模型: {len(valid_models)}")
+        print(f"   无效模型: {len(invalid_models)}")
+        
+        if not invalid_models:
+            print("✅ 没有发现无效模型")
+            return
+        
+        print("\n🗑️  发现的无效模型:")
+        for i, (model_path, issues) in enumerate(invalid_models, 1):
+            size = self.get_model_size(model_path)
+            print(f"   {i}. {model_path.name} ({size}) - {', '.join(issues)}")
+        
+        # 询问用户是否清理
+        print(f"\n⚠️  即将删除 {len(invalid_models)} 个无效模型")
+        confirm = input("确认删除吗？(y/N): ").strip().lower()
+        
+        if confirm in ['y', 'yes', '是']:
+            print("\n🧹 开始清理无效模型...")
+            
+            for model_path, issues in invalid_models:
+                try:
+                    # 计算删除前的大小
+                    size_before = self.get_model_size(model_path)
+                    
+                    # 删除目录
+                    import shutil
+                    shutil.rmtree(model_path)
+                    
+                    print(f"   ✅ 已删除: {model_path.name} ({size_before})")
+                    
+                    # 尝试解析大小以计算总释放空间
+                    try:
+                        if 'GB' in size_before:
+                            size_gb = float(size_before.replace(' GB', ''))
+                            total_size_freed += size_gb
+                        elif 'MB' in size_before:
+                            size_mb = float(size_before.replace(' MB', ''))
+                            total_size_freed += size_mb / 1024
+                    except:
+                        pass
+                        
+                except Exception as e:
+                    print(f"   ❌ 删除失败: {model_path.name} - {e}")
+            
+            print(f"\n✅ 清理完成!")
+            if total_size_freed > 0:
+                print(f"📊 释放空间: {total_size_freed:.2f} GB")
+        else:
+            print("❌ 取消清理")
 
 def main():
     """主函数"""
@@ -694,9 +809,10 @@ def main():
         print("4. 查看已下载模型")
         print("5. 查看模型详细信息")
         print("6. 删除模型")
-        print("7. 退出")
+        print("7. 一键清理无效模型")
+        print("8. 退出")
         
-        choice = input("\n请输入选择 (1-7): ").strip()
+        choice = input("\n请输入选择 (1-8): ").strip()
         
         if choice == "1":
             model_name = input("请输入模型名称: ").strip()
@@ -779,6 +895,9 @@ def main():
                 print("❌ 无效的选择")
             
         elif choice == "7":
+            downloader.clean_invalid_models()
+            
+        elif choice == "8":
             print("👋 再见！")
             break
             
